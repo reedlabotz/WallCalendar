@@ -3,16 +3,23 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"time"
 
+	"github.com/tdewolff/canvas"
+	"github.com/tdewolff/canvas/renderers"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
 	"google.golang.org/api/option"
+)
+
+const (
+	numWeeks = 4
 )
 
 // Retrieve a token, saves the token, then returns the generated client.
@@ -70,6 +77,25 @@ func saveToken(path string, token *oauth2.Token) {
 	json.NewEncoder(f).Encode(token)
 }
 
+func startOfDayOfWeek(date time.Time, location *time.Location) time.Time {
+	daysSinceSunday := int(date.Weekday())
+	return midnight(date.AddDate(0, 0, -daysSinceSunday), location)
+}
+
+func midnight(t time.Time, location *time.Location) time.Time {
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, location)
+}
+
+func getEventTime(start *calendar.EventDateTime) (time.Time, error) {
+	if start.Date != "" {
+		return time.Parse(time.DateOnly, start.Date)
+	}
+	if start.DateTime != "" {
+		return time.Parse(time.RFC3339, start.DateTime)
+	}
+	return time.UnixMicro(0), errors.New("no date found on event")
+}
+
 func main() {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
@@ -89,22 +115,79 @@ func main() {
 		log.Fatalf("Unable to retrieve Calendar client: %v", err)
 	}
 
-	t := time.Now().Format(time.RFC3339)
-	events, err := srv.Events.List("primary").ShowDeleted(false).
-		SingleEvents(true).TimeMin(t).MaxResults(10).OrderBy("startTime").Do()
+	newYork, _ := time.LoadLocation("America/New_York")
+
+	today := midnight(time.Now().In(newYork), newYork)
+	start := startOfDayOfWeek(today, newYork)
+	end := start.AddDate(0, 0, numWeeks*7+1)
+
+	dateMap := make(map[time.Time][]*calendar.Event)
+
+	events, err := srv.Events.List("family01175849838019336469@group.calendar.google.com").ShowDeleted(false).
+		SingleEvents(true).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).OrderBy("startTime").Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
 	}
-	fmt.Println("Upcoming events:")
+
 	if len(events.Items) == 0 {
 		fmt.Println("No upcoming events found.")
 	} else {
 		for _, item := range events.Items {
-			date := item.Start.DateTime
-			if date == "" {
-				date = item.Start.Date
-			}
-			fmt.Printf("%v (%v)\n", item.Summary, date)
+			date, _ := getEventTime(item.Start)
+			roundedDate := midnight(date, newYork)
+			dateMap[roundedDate] = append(dateMap[roundedDate], item)
 		}
+	}
+
+	c := canvas.New(1304, 984)
+	context := canvas.NewContext(c)
+	context.MoveTo(0, 0)
+	context.LineTo(1304, 0)
+	context.LineTo(1304, 984)
+	context.LineTo(0, 984)
+	context.SetFillColor(canvas.Whitesmoke)
+	context.Fill()
+
+	fontQuattrocento := canvas.NewFontFamily("quattrocento")
+	if err := fontQuattrocento.LoadFontFile("Quattrocento-Regular.ttf", canvas.FontRegular); err != nil {
+		panic(err)
+	}
+	if err := fontQuattrocento.LoadFontFile("Quattrocento-Regular.ttf", canvas.FontBold); err != nil {
+		panic(err)
+	}
+
+	calendar := &Calendar{
+		HeaderFace:    fontQuattrocento.Face(60.0, canvas.Black, canvas.FontBold),
+		EventFace:     fontQuattrocento.Face(45.0, canvas.Black, canvas.FontRegular),
+		EventTimeFace: fontQuattrocento.Face(45.0, canvas.Black, canvas.FontItalic),
+		Timezone:      newYork,
+	}
+
+	daysOfWeek := []string{
+		"SUN",
+		"MON",
+		"TUE",
+		"WED",
+		"THU",
+		"FRI",
+		"SAT",
+	}
+	for i, day := range daysOfWeek {
+		calendar.RenderHeader(context, float64(i*186+18), 925, day)
+	}
+
+	for i := 0; i < numWeeks; i++ {
+		for j := 0; j < 7; j++ {
+			date := start.AddDate(0, 0, 7*i+j)
+
+			boxLeft := float64(j*186 + 18)
+			boxTop := float64(900 - 225*i)
+			calendar.Render(context, boxLeft, boxTop, date, dateMap[date], date == today)
+		}
+
+	}
+
+	if err := renderers.Write("output.png", c, canvas.DPMM(1)); err != nil {
+		panic(err)
 	}
 }
