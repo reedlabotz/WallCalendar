@@ -32,6 +32,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.13.0 // indirect
 	github.com/kolesa-team/go-webp v1.0.4 // indirect
+	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tdewolff/font v0.0.0-20240728193914-9dc6e3441d03 // indirect
 	github.com/tdewolff/minify/v2 v2.20.5 // indirect
 	github.com/tdewolff/parse/v2 v2.7.15 // indirect
