@@ -1,8 +1,11 @@
 package waveshare
 
 import (
+	"fmt"
 	"image"
+	"image/png"
 	"log"
+	"os"
 	"time"
 
 	"github.com/stianeikeland/go-rpio/v4"
@@ -20,9 +23,6 @@ const (
 	s1Width  = 656
 	m2Height = 492
 	m2Width  = 656
-
-	epdSckPin  = rpio.Pin(11)
-	epdMosiPin = rpio.Pin(10)
 
 	m1CsPin = rpio.Pin(8)
 	s1CsPin = rpio.Pin(7)
@@ -50,8 +50,14 @@ const (
 	S2
 )
 
-func init() {
-	log.Print("init()")
+// Exit releases SPI/GPIO control
+func Close() {
+	rpio.SpiEnd(rpio.Spi0)
+	rpio.Close()
+}
+
+func Initialize() {
+	log.Print("Initialize()")
 	if err := rpio.Open(); err != nil {
 		panic(err)
 	}
@@ -59,17 +65,11 @@ func init() {
 	if err := rpio.SpiBegin(rpio.Spi0); err != nil {
 		panic(err)
 	}
-	log.Print("init() done")
-}
 
-// Exit releases SPI/GPIO control
-func Exit() {
-	rpio.SpiEnd(rpio.Spi0)
-	rpio.Close()
-}
+	// configure SPI settings
+	rpio.SpiSpeed(4_000_000)
+	rpio.SpiMode(0, 0)
 
-func Initialize() {
-	log.Print("Initialize()")
 	m1s1ResetPin.Mode(rpio.Output)
 	m2s2ResetPin.Mode(rpio.Output)
 
@@ -149,6 +149,8 @@ func Initialize() {
 
 	SendCommandAll(0xE3)
 	SendDataAll(0x00)
+
+	ReadTemperature()
 
 	log.Print("Initialize() done")
 }
@@ -267,50 +269,32 @@ const (
 	Red
 )
 
-func DisplayInner(screen Screen, color Color, xOffset int, yOffset int, width int, height int, image image.Image) {
-	log.Printf("DisplayInner(%d, %d)", screen, color)
-	var command byte
-	switch color {
-	case Black:
-		command = 0x10
-	case Red:
-		command = 0x13
-	}
-	count := 0
-	SendCommand(screen, command)
+func DisplayInner(screen Screen, xOffset int, yOffset int, width int, height int, img image.Image) {
+	imgOut := NewHorizontalLSB(image.Rect(0, 0, width, height))
 	for y := 0; y < height; y++ {
-		for x := 0; x < width/8; x++ {
-			bitArray := []int{1, 1, 1, 1, 1, 1, 1, 1}
-			for i := 0; i < 8; i++ {
-				r, g, b, _ := image.At(xOffset+x*8+i, yOffset+y).RGBA()
-				if r < 1000 && g < 1000 && b < 1000 {
-					bitArray[i] = 0
-				}
-			}
-
-			b := (bitArray[0] * 128) + (bitArray[1] * 64) + (bitArray[2] * 32) + (bitArray[3] * 16) + (bitArray[4] * 8) + (bitArray[5] * 4) + (bitArray[6] * 2) + (bitArray[7] * 1)
-			if color == Red {
-				SendData(screen, 0x00)
-			} else {
-				SendData(screen, byte(b))
-			}
-			count += 1
+		for x := 0; x < width; x++ {
+			imgOut.Set(x, y, img.At(xOffset+x, yOffset+y))
 		}
 	}
-	log.Printf("count: %d", count)
+	f, _ := os.Create(fmt.Sprintf("%d-processed.png", screen))
+	png.Encode(f, imgOut)
+
+	SendCommand(screen, 0x10)
+	for _, b := range imgOut.BlackPix {
+		SendData(screen, b)
+	}
+	SendCommand(screen, 0x13)
+	for _, b := range imgOut.RedPix {
+		SendData(screen, b)
+	}
 }
 
-func Display(image image.Image) {
+func Display(img image.Image) {
 	log.Print("Display()")
-	DisplayInner(S2, Black, 0, 0, s2Width, s2Height, image)
-	DisplayInner(S2, Red, 0, 0, s2Width, s2Height, image)
-	DisplayInner(M2, Black, s2Width, 0, m2Width, m2Height, image)
-	DisplayInner(M2, Red, s2Width, 0, m2Width, m2Height, image)
-	DisplayInner(S1, Black, m1Width, s2Height, s1Width, s1Height, image)
-	DisplayInner(S1, Red, m1Width, s2Height, s1Width, s1Height, image)
-	DisplayInner(M1, Black, 0, s2Height, m1Width, m1Height, image)
-	DisplayInner(M1, Red, 0, s2Height, m1Width, m1Height, image)
-
+	DisplayInner(S2, 0, 0, s2Width, s2Height, img)
+	DisplayInner(M2, s2Width, 0, m2Width, m2Height, img)
+	DisplayInner(S1, m1Width, s2Height, s1Width, s1Height, img)
+	DisplayInner(M1, 0, s2Height, m1Width, m1Height, img)
 	TurnDisplayOn()
 
 	log.Print("Display() done")
@@ -354,9 +338,32 @@ func ReadBusy(screen Screen) {
 		pin = s2BusyPin
 	}
 
-	for busy := pin.Read(); busy == rpio.Low; busy = pin.Read() {
-		SendCommand(screen, 0x71)
+	for pin.Read() == rpio.Low {
 		time.Sleep(200 * time.Millisecond)
 	}
 	log.Print("ReadBusy() done")
+}
+
+func ReadTemperature() {
+	log.Print("ReadTemperature()")
+	SendCommand(M1, 0x40)
+	ReadBusy(M1)
+	time.Sleep(300 * time.Millisecond)
+	m1CsPin.Write(rpio.High)
+	s1CsPin.Write(rpio.High)
+	m2CsPin.Write(rpio.High)
+	s2CsPin.Write(rpio.High)
+
+	m1s1DcPin.Write(rpio.High)
+	time.Sleep(5 * time.Microsecond)
+
+	temp := rpio.SpiReceive(1)
+	m1CsPin.Write(rpio.High)
+	log.Printf("Read Temperature Reg:%d", temp[0])
+
+	SendCommandAll(0xe0) //Cascade setting
+	SendDataAll(0x03)
+	SendCommandAll(0xe5) //Force temperature
+	SendDataAll(temp[0])
+	log.Print("ReadTemperature() done")
 }

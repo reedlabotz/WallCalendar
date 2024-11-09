@@ -6,12 +6,11 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"image"
+	"image/png"
 	"log"
 	"net/http"
 	"os"
 	"time"
-
 	"wallcalendar/waveshare"
 
 	"github.com/tdewolff/canvas"
@@ -201,18 +200,21 @@ func main() {
 	}
 
 	waveshare.Initialize()
+	defer waveshare.Close()
+
 	//waveshare.Clear()
+	//time.Sleep(300 * time.Millisecond)
 
 	f, err := os.Open("output.png")
 	if err != nil {
 		panic(err)
 	}
 	defer f.Close()
-	image, _, err := image.Decode(f)
+	img, err := png.Decode(f)
 	if err != nil {
 		panic(err)
 	}
 
-	waveshare.Display(image)
+	waveshare.Display(img)
 	waveshare.Sleep()
 }
