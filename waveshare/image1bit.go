@@ -92,7 +92,7 @@ func (i *HorizontalLSB) BitAt(x, y int) Bit {
 	if i.BlackPix[offset]&mask == 0 {
 		return BlackBit
 	}
-	if i.RedPix[offset]&mask > 1 {
+	if i.RedPix[offset]&mask > 0 {
 		return RedBit
 	}
 	return WhiteBit

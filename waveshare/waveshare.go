@@ -1,11 +1,8 @@
 package waveshare
 
 import (
-	"fmt"
 	"image"
-	"image/png"
 	"log"
-	"os"
 	"time"
 
 	"github.com/stianeikeland/go-rpio/v4"
@@ -276,8 +273,6 @@ func DisplayInner(screen Screen, xOffset int, yOffset int, width int, height int
 			imgOut.Set(x, y, img.At(xOffset+x, yOffset+y))
 		}
 	}
-	f, _ := os.Create(fmt.Sprintf("%d-processed.png", screen))
-	png.Encode(f, imgOut)
 
 	SendCommand(screen, 0x10)
 	for _, b := range imgOut.BlackPix {

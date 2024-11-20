@@ -6,6 +6,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"image"
 	"image/png"
 	"log"
 	"net/http"
@@ -13,8 +14,10 @@ import (
 	"time"
 	"wallcalendar/waveshare"
 
-	"github.com/tdewolff/canvas"
-	"github.com/tdewolff/canvas/renderers"
+	"github.com/golang/freetype/truetype"
+	"golang.org/x/image/font/gofont/gomonobold"
+	"golang.org/x/image/font/gofont/goregular"
+	"golang.org/x/image/font/gofont/gosmallcaps"
 	"golang.org/x/oauth2"
 	"golang.org/x/oauth2/google"
 	"google.golang.org/api/calendar/v3"
@@ -99,9 +102,21 @@ func getEventTime(start *calendar.EventDateTime) (time.Time, error) {
 	return time.UnixMicro(0), errors.New("no date found on event")
 }
 
+func loadFont(ttf []byte) *truetype.Font {
+	font, err := truetype.Parse(ttf)
+	if err != nil {
+		panic(err)
+	}
+	return font
+}
+
 func main() {
 	useCachedImage := flag.Bool("use_cached_image", false, "If cached image should be used")
+	onlyRenderImage := flag.Bool("only_render_image", false, "Only render the image, no screen")
+	clearScreen := flag.Bool("clear_screen", false, "Clear the screen")
 	flag.Parse()
+
+	img := waveshare.NewHorizontalLSB(image.Rect(0, 0, 1304, 984))
 
 	if !*useCachedImage {
 		ctx := context.Background()
@@ -126,7 +141,8 @@ func main() {
 
 		today := midnight(time.Now().In(newYork), newYork)
 		start := startOfDayOfWeek(today, newYork)
-		end := start.AddDate(0, 0, numWeeks*7+1)
+		end := start.AddDate(0, 0, numWeeks*7)
+		lastday := end.AddDate(0, 0, -1)
 
 		dateMap := make(map[time.Time][]*calendar.Event)
 
@@ -146,75 +162,46 @@ func main() {
 			}
 		}
 
-		c := canvas.New(1304, 984)
-		context := canvas.NewContext(c)
-		context.MoveTo(0, 0)
-		context.LineTo(1304, 0)
-		context.LineTo(1304, 984)
-		context.LineTo(0, 984)
-		context.SetFillColor(canvas.Whitesmoke)
-		context.Fill()
-
-		fontQuattrocento := canvas.NewFontFamily("quattrocento")
-		if err := fontQuattrocento.LoadFontFile("Quattrocento-Regular.ttf", canvas.FontRegular); err != nil {
-			panic(err)
-		}
-		if err := fontQuattrocento.LoadFontFile("Quattrocento-Regular.ttf", canvas.FontBold); err != nil {
-			panic(err)
-		}
-
 		calendar := &Calendar{
-			HeaderFace:    fontQuattrocento.Face(60.0, canvas.Black, canvas.FontBold),
-			EventFace:     fontQuattrocento.Face(45.0, canvas.Black, canvas.FontRegular),
-			EventTimeFace: fontQuattrocento.Face(45.0, canvas.Black, canvas.FontItalic),
+			HeaderFace:    loadFont(gomonobold.TTF),
+			DateFace:      loadFont(gomonobold.TTF),
+			EventFace:     loadFont(goregular.TTF),
+			EventTimeFace: loadFont(gosmallcaps.TTF),
 			Timezone:      newYork,
 		}
 
-		daysOfWeek := []string{
-			"SUN",
-			"MON",
-			"TUE",
-			"WED",
-			"THU",
-			"FRI",
-			"SAT",
+		if start.Month() == lastday.Month() {
+			calendar.RenderMonth(img, today.Format("January 2006"))
+		} else if start.Year() == lastday.Year() {
+			calendar.RenderMonth(img, fmt.Sprintf("%s/%s %s", start.Format("January"), lastday.Format("January"), start.Format("2006")))
+		} else {
+			calendar.RenderMonth(img, fmt.Sprintf("%s/%s", start.Format("January 2006"), lastday.Format("January 2006")))
 		}
-		for i, day := range daysOfWeek {
-			calendar.RenderHeader(context, float64(i*186+18), 925, day)
-		}
+
+		calendar.RenderDayHeaders(img)
 
 		for i := 0; i < numWeeks; i++ {
 			for j := 0; j < 7; j++ {
 				date := start.AddDate(0, 0, 7*i+j)
-
-				boxLeft := float64(j*186 + 18)
-				boxTop := float64(900 - 225*i)
-				calendar.Render(context, boxLeft, boxTop, date, dateMap[date], date == today)
+				calendar.Render(img, j, i, date, dateMap[date], date == today)
 			}
 
 		}
+	}
 
-		if err := renderers.Write("output.png", c, canvas.DPMM(1)); err != nil {
-			panic(err)
+	if *onlyRenderImage {
+		f, _ := os.Create("processed.png")
+		png.Encode(f, img)
+	} else {
+		waveshare.Initialize()
+		defer waveshare.Close()
+
+		if *clearScreen {
+			waveshare.Clear()
+			time.Sleep(300 * time.Millisecond)
 		}
+
+		waveshare.Display(img)
+		waveshare.Sleep()
 	}
-
-	waveshare.Initialize()
-	defer waveshare.Close()
-
-	//waveshare.Clear()
-	//time.Sleep(300 * time.Millisecond)
-
-	f, err := os.Open("output.png")
-	if err != nil {
-		panic(err)
-	}
-	defer f.Close()
-	img, err := png.Decode(f)
-	if err != nil {
-		panic(err)
-	}
-
-	waveshare.Display(img)
-	waveshare.Sleep()
 }
