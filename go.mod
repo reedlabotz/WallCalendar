@@ -10,16 +10,20 @@ require (
 	google.golang.org/api v0.203.0
 )
 
+require github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a // indirect
+
 require (
 	cloud.google.com/go/auth v0.9.9 // indirect
 	cloud.google.com/go/auth/oauth2adapt v0.2.4 // indirect
 	cloud.google.com/go/compute/metadata v0.5.2 // indirect
+	github.com/AndreKR/multiface v0.0.0-20211114051930-f51f19dee2dc
 	github.com/ByteArena/poly2tri-go v0.0.0-20170716161910-d102ad91854f // indirect
 	github.com/Kagami/go-avif v0.1.0 // indirect
 	github.com/andybalholm/brotli v1.1.0 // indirect
 	github.com/benoitkugler/textlayout v0.3.0 // indirect
 	github.com/benoitkugler/textprocessing v0.0.3 // indirect
 	github.com/felixge/httpsnoop v1.0.4 // indirect
+	github.com/furconz/freetype v0.0.0-20240415014455-f5892a2b23a3
 	github.com/go-fonts/latin-modern v0.3.1 // indirect
 	github.com/go-latex/latex v0.0.0-20230307184459-12ec69307ad9 // indirect
 	github.com/go-logr/logr v1.4.2 // indirect
@@ -32,6 +36,7 @@ require (
 	github.com/googleapis/enterprise-certificate-proxy v0.3.4 // indirect
 	github.com/googleapis/gax-go/v2 v2.13.0 // indirect
 	github.com/kolesa-team/go-webp v1.0.4 // indirect
+	github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0
 	github.com/stianeikeland/go-rpio v4.2.0+incompatible
 	github.com/stianeikeland/go-rpio/v4 v4.6.0
 	github.com/tdewolff/font v0.0.0-20240728193914-9dc6e3441d03 // indirect

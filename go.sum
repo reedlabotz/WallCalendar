@@ -7,6 +7,8 @@ cloud.google.com/go/compute/metadata v0.5.2 h1:UxK4uu/Tn+I3p2dYWTfiX4wva7aYlKixA
 cloud.google.com/go/compute/metadata v0.5.2/go.mod h1:C66sj2AluDcIqakBq/M8lw8/ybHgOZqin2obFxa/E5k=
 git.sr.ht/~sbinet/gg v0.5.0 h1:6V43j30HM623V329xA9Ntq+WJrMjDxRjuAB1LFWF5m8=
 git.sr.ht/~sbinet/gg v0.5.0/go.mod h1:G2C0eRESqlKhS7ErsNey6HHrqU1PwsnCQlekFi9Q2Oo=
+github.com/AndreKR/multiface v0.0.0-20211114051930-f51f19dee2dc h1:GxC4QnIlfhsRRA4gqAysU56UrDPAUcn4thbtlIEaNKw=
+github.com/AndreKR/multiface v0.0.0-20211114051930-f51f19dee2dc/go.mod h1:F4/sRjlOnpYMDwGUhf9wFxPeM69ZsJw8q4x8258R6LE=
 github.com/BurntSushi/toml v0.3.1/go.mod h1:xHWCNGjB5oqiDr8zfno3MHue2Ht5sIBksp03qcyfWMU=
 github.com/ByteArena/poly2tri-go v0.0.0-20170716161910-d102ad91854f h1:l7moT9o/v/9acCWA64Yz/HDLqjcRTvc0noQACi4MsJw=
 github.com/ByteArena/poly2tri-go v0.0.0-20170716161910-d102ad91854f/go.mod h1:vIOkSdX3NDCPwgu8FIuTat2zDF0FPXXQ0RYFRy+oQic=
@@ -38,6 +40,8 @@ github.com/envoyproxy/go-control-plane v0.9.4/go.mod h1:6rpuAdCZL397s3pYoYcLgu1m
 github.com/envoyproxy/protoc-gen-validate v0.1.0/go.mod h1:iSmxcyjqTsJpI2R4NaDN7+kN2VEUnK/pcBlmesArF7c=
 github.com/felixge/httpsnoop v1.0.4 h1:NFTV2Zj1bL4mc9sqWACXbQFVBBg2W3GPvqp8/ESS2Wg=
 github.com/felixge/httpsnoop v1.0.4/go.mod h1:m8KPJKqk1gH5J9DgRY2ASl2lWCfGKXixSwevea8zH2U=
+github.com/furconz/freetype v0.0.0-20240415014455-f5892a2b23a3 h1:ph5uIj9Xt+ed4GhThuQ3pzIlB+jTbgt3nbgqAbH1Ei0=
+github.com/furconz/freetype v0.0.0-20240415014455-f5892a2b23a3/go.mod h1:+EKvzudqR/mow/DiPQG5oVAeoZ4gwJFZwkcEOBmXGWA=
 github.com/go-fonts/dejavu v0.1.0 h1:JSajPXURYqpr+Cu8U9bt8K+XcACIHWqWrvWCKyeFmVQ=
 github.com/go-fonts/dejavu v0.1.0/go.mod h1:4Wt4I4OU2Nq9asgDCteaAaWZOV24E+0/Pwo0gppep4g=
 github.com/go-fonts/latin-modern v0.3.1 h1:/cT8A7uavYKvglYXvrdDw4oS5ZLkcOU22fa2HJ1/JVM=
@@ -92,6 +96,10 @@ github.com/googleapis/gax-go/v2 v2.13.0 h1:yitjD5f7jQHhyDsnhKEBU52NdvvdSeGzlAnDP
 github.com/googleapis/gax-go/v2 v2.13.0/go.mod h1:Z/fvTZXF8/uw7Xu5GuslPw+bplx6SS338j1Is2S+B7A=
 github.com/kolesa-team/go-webp v1.0.4 h1:wQvU4PLG/X7RS0vAeyhiivhLRoxfLVRlDq4I3frdxIQ=
 github.com/kolesa-team/go-webp v1.0.4/go.mod h1:oMvdivD6K+Q5qIIkVC2w4k2ZUnI1H+MyP7inwgWq9aA=
+github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0 h1:UFF+CuOnKbYmhHij3x4kur7NVQVqWL/ocxKpBopcZKw=
+github.com/lovelydeng/gomoji v0.0.0-20221120141925-ea446dc92ac0/go.mod h1:iJlgOov0BBlkwqd0CxMUoLWn733LtoLevQ/l2H11BmM=
+github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a h1:BLRArvRRwtc4e/8oG8/fbdRnO0w8o0g4vA+rjwS92mM=
+github.com/lovelydeng/uniseg v0.0.0-20221120141218-19f3806b842a/go.mod h1:LHUI1u/1Y1MDcWiLtdN+ARgrPi/i8CdwPk4/SMvEoSE=
 github.com/pmezard/go-difflib v1.0.0 h1:4DBwDE0NGyQoBHbLQYPwSUPoCMWR5BEzIk/f1lZbAQM=
 github.com/pmezard/go-difflib v1.0.0/go.mod h1:iKH77koFhYxTK1pcRnkKkqfTogsbg7gZNVY4sRDYZ/4=
 github.com/prometheus/client_model v0.0.0-20190812154241-14fe0d1b01d4/go.mod h1:xMI15A0UPsDsEKsMN9yxemIoYk6Tm2C1GtYGdfGttqA=

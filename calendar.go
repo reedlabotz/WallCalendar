@@ -7,7 +7,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/golang/freetype/truetype"
+	"github.com/furconz/freetype/truetype"
+	"github.com/lovelydeng/gomoji"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 	"google.golang.org/api/calendar/v3"
@@ -96,12 +97,6 @@ func (c Calendar) Render(dst draw.Image, col int, row int, date time.Time, event
 		dst.Set(boxLeft+i, boxTop, image.Black)
 	}
 
-	if isToday {
-		left := boxLeft + cellPadding + 15
-		top := boxTop + 20
-		c.drawCircle(dst, left, top, 18, color.RGBA{0xff, 0, 0, 0xff})
-		c.drawCircle(dst, left, top, 15, color.White)
-	}
 	d := &font.Drawer{
 		Dst: dst,
 		Src: image.Black,
@@ -110,6 +105,13 @@ func (c Calendar) Render(dst draw.Image, col int, row int, date time.Time, event
 			DPI:     72,
 			Hinting: font.HintingFull,
 		}),
+	}
+	if isToday {
+		size := font.MeasureString(d.Face, date.Format("2"))
+		left := boxLeft + cellPadding + size.Round()/2
+		top := boxTop - cellPadding + 24
+		c.drawCircle(dst, left, top, 18, color.RGBA{0xff, 0, 0, 0xff})
+		c.drawCircle(dst, left, top, 15, color.White)
 	}
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(boxLeft + cellPadding),
@@ -133,23 +135,17 @@ func (c Calendar) Render(dst draw.Image, col int, row int, date time.Time, event
 		X: fixed.I(x),
 		Y: fixed.I(y),
 	}
+	newYork, _ := time.LoadLocation("America/New_York")
 	for _, item := range events {
 		d2.Dot.X = fixed.I(x)
-		if item.Start.DateTime != "" {
-			eventTime, _ := time.Parse(time.RFC3339, item.Start.DateTime)
-			fmt := "3:04pm "
-			if eventTime.Minute() == 0 {
-				fmt = "3pm "
-			}
+		if IsAllDayEvent(item) {
 			d2.Face = truetype.NewFace(c.EventTimeFace, &truetype.Options{
-				Size:    12,
+				Size:    16,
 				DPI:     72,
 				Hinting: font.HintingFull,
 			})
-			d2.Dot.Y -= fixed.I(4)
 			d2.Src = image.NewUniform(color.RGBA{0xff, 0, 0, 0xff})
-			d2.DrawString(eventTime.In(c.Timezone).Format(fmt))
-			d2.Dot.Y += fixed.I(4)
+			d2.DrawString(StartTimeShort(item, newYork))
 		}
 		d2.Face = truetype.NewFace(c.EventFace, &truetype.Options{
 			Size:    16,
@@ -159,6 +155,11 @@ func (c Calendar) Render(dst draw.Image, col int, row int, date time.Time, event
 		d2.Src = image.Black
 		words := strings.Split(item.Summary, " ")
 		for _, w := range words {
+			if gomoji.ContainsEmoji(w) {
+				d2.Src = image.NewUniform(color.RGBA{0xff, 0, 0, 0xff})
+			} else {
+				d2.Src = image.Black
+			}
 			width := font.MeasureString(d2.Face, w)
 			if d2.Dot.X+width-fixed.I(boxLeft) > fixed.I(columnWidth-cellPadding*2) {
 				d2.Dot.X = fixed.I(boxLeft + cellPadding)
@@ -168,4 +169,22 @@ func (c Calendar) Render(dst draw.Image, col int, row int, date time.Time, event
 		}
 		d2.Dot.Y += fixed.I(24)
 	}
+}
+
+func (c Calendar) RenderBatteryAndTime(dst draw.Image, battery string) {
+	d2 := &font.Drawer{
+		Dst: dst,
+		Src: image.Black,
+		Face: truetype.NewFace(c.EventFace, &truetype.Options{
+			Size:    11,
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+	}
+	d2.Dot = fixed.Point26_6{
+		X: fixed.I(2),
+		Y: fixed.I(10),
+	}
+	newYork, _ := time.LoadLocation("America/New_York")
+	d2.DrawString(time.Now().In(newYork).Format(time.Kitchen) + " | " + battery)
 }
