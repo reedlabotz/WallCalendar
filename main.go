@@ -6,10 +6,14 @@ import (
 	"image"
 	"image/png"
 	"os"
+	"strconv"
+	"strings"
 	"time"
+	"wallcalendar/canvas"
 	"wallcalendar/waveshare"
 
 	"github.com/furconz/freetype/truetype"
+	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
 )
 
@@ -57,33 +61,61 @@ func main() {
 	}
 
 	dateMap, start, lastday := FetchEvents(today, newYork)
+	goMono := loadFont(gomono.TTF)
+	unifontMono := loadFontFile("fonts/UnifontExMono.ttf")
 
-	calendar := &Calendar{
-		HeaderFace:    loadFont(gomono.TTF),
-		DateFace:      loadFont(gomono.TTF),
-		EventFace:     loadFontFile("fonts/UnifontExMono.ttf"),
-		EventTimeFace: loadFontFile("fonts/UnifontExMono.ttf"),
-		Timezone:      newYork,
-	}
+	canv := canvas.NewCanvas(img)
+	c := NewCalendar(
+		canv,
+		truetype.NewFace(goMono, &truetype.Options{
+			Size:    70,
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+		truetype.NewFace(goMono, &truetype.Options{
+			Size:    24,
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+		truetype.NewFace(unifontMono, &truetype.Options{
+			Size:    16,
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+		truetype.NewFace(unifontMono, &truetype.Options{
+			Size:    11,
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+		newYork)
 
 	if start.Month() == lastday.Month() {
-		calendar.RenderMonth(img, today.Format("January 2006"))
+		c.RenderMonth(today.Format("January 2006"))
 	} else if start.Year() == lastday.Year() {
-		calendar.RenderMonth(img, fmt.Sprintf("%s/%s %s", start.Format("January"), lastday.Format("January"), start.Format("2006")))
+		c.RenderMonth(fmt.Sprintf("%s/%s %s", start.Format("January"), lastday.Format("January"), start.Format("2006")))
 	} else {
-		calendar.RenderMonth(img, fmt.Sprintf("%s/%s", start.Format("January 2006"), lastday.Format("January 2006")))
+		c.RenderMonth(fmt.Sprintf("%s/%s", start.Format("January 2006"), lastday.Format("January 2006")))
 	}
 
-	calendar.RenderDayHeaders(img)
+	c.RenderDayHeaders()
 
 	for i := 0; i < numWeeks; i++ {
 		for j := 0; j < 7; j++ {
 			date := start.AddDate(0, 0, 7*i+j)
-			calendar.Render(img, j, i, date, dateMap[date], date == today)
+			c.Render(j, i, date, dateMap[date], date == today)
 		}
 	}
 
-	calendar.RenderBatteryAndTime(img, *battery)
+	batteryParts := strings.Split(*battery, " ")
+	if len(batteryParts) != 2 {
+		panic("Battery is wrong" + *battery)
+	}
+	num, err := strconv.ParseFloat(batteryParts[1], 64)
+	if err != nil {
+		panic(err)
+	}
+
+	c.RenderBatteryAndTime(num)
 
 	if *onlyRenderImage {
 		f, _ := os.Create("processed.png")

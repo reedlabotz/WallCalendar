@@ -17,22 +17,71 @@ import (
 )
 
 type Event struct {
+	Summary       string
+	StartTime     time.Time
+	EndTime       time.Time
+	IsAllDayEvent bool
 }
 
-func IsAllDayEvent(event *calendar.Event) bool {
-	return event.Start.DateTime != ""
+func getTime(dateTime *calendar.EventDateTime, tz *time.Location, isEnd bool) (time.Time, error) {
+	if dateTime.DateTime != "" {
+		eventTime, err := time.Parse(time.RFC3339, dateTime.DateTime)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return eventTime.In(tz), nil
+
+	}
+	eventTime, err := time.ParseInLocation(time.DateOnly, dateTime.Date, tz)
+	if err != nil {
+		return time.Time{}, err
+	}
+	if isEnd {
+		return eventTime.Add(-1 * time.Second), nil
+	}
+	return eventTime, nil
 }
 
-func StartTimeShort(event *calendar.Event, tz *time.Location) string {
-	eventTime, _ := time.Parse(time.RFC3339, event.Start.DateTime)
+func NewEvent(e *calendar.Event, tz *time.Location) (Event, error) {
+	start, err := getTime(e.Start, tz, false)
+	if err != nil {
+		return Event{}, err
+	}
+	end, err := getTime(e.End, tz, true)
+	if err != nil {
+		return Event{}, err
+	}
+	return Event{
+		Summary:       e.Summary,
+		StartTime:     start,
+		EndTime:       end,
+		IsAllDayEvent: e.Start.Date != "",
+	}, nil
+}
+
+func isSameDay(a time.Time, b time.Time, tz *time.Location) bool {
+	a1 := midnight(a, tz)
+	b1 := midnight(b, tz)
+	return a1.Equal(b1)
+}
+
+func (e Event) StartsOnDate(date time.Time, tz *time.Location) bool {
+	return isSameDay(e.StartTime, date, tz)
+}
+
+func (e Event) EndsOnDate(date time.Time, tz *time.Location) bool {
+	return isSameDay(e.EndTime, date, tz)
+}
+
+func (e Event) StartTimeShort(tz *time.Location) string {
 	fmt := "3:04pm "
-	if eventTime.Minute() == 0 {
+	if e.StartTime.Minute() == 0 {
 		fmt = "3pm "
 	}
-	return eventTime.In(tz).Format(fmt)
+	return e.StartTime.In(tz).Format(fmt)
 }
 
-func FetchEvents(today time.Time, timezone *time.Location) (map[time.Time][]*calendar.Event, time.Time, time.Time) {
+func FetchEvents(today time.Time, tz *time.Location) (map[time.Time][]Event, time.Time, time.Time) {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
 	if err != nil {
@@ -51,11 +100,11 @@ func FetchEvents(today time.Time, timezone *time.Location) (map[time.Time][]*cal
 		log.Fatalf("Unable to retrieve Calendar client: %v", err)
 	}
 
-	start := startOfDayOfWeek(today, timezone)
+	start := startOfDayOfWeek(today, tz)
 	end := start.AddDate(0, 0, numWeeks*7)
 	lastday := end.AddDate(0, 0, -1)
 
-	dateMap := make(map[time.Time][]*calendar.Event)
+	dateMap := make(map[time.Time][]Event)
 
 	events, err := srv.Events.List("family01175849838019336469@group.calendar.google.com").ShowDeleted(false).
 		SingleEvents(true).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).OrderBy("startTime").Do()
@@ -67,9 +116,13 @@ func FetchEvents(today time.Time, timezone *time.Location) (map[time.Time][]*cal
 		fmt.Println("No upcoming events found.")
 	} else {
 		for _, item := range events.Items {
-			date, _ := getEventTime(item.Start, timezone)
-			roundedDate := midnight(date, timezone)
-			dateMap[roundedDate] = append(dateMap[roundedDate], item)
+			e, _ := NewEvent(item, tz)
+			roundedDate := midnight(e.StartTime, tz)
+			roundedEndDate := midnight(e.EndTime, tz)
+			dateMap[roundedDate] = append(dateMap[roundedDate], e)
+			for roundedDate = roundedDate.Add(24 * time.Hour); roundedDate.Compare(roundedEndDate) <= 0; roundedDate = roundedDate.Add(24 * time.Hour) {
+				dateMap[roundedDate] = append(dateMap[roundedDate], e)
+			}
 		}
 	}
 
@@ -81,9 +134,9 @@ func startOfDayOfWeek(date time.Time, location *time.Location) time.Time {
 	return midnight(date.AddDate(0, 0, -daysSinceSunday), location)
 }
 
-func midnight(t time.Time, location *time.Location) time.Time {
-	t = t.In(location)
-	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, location)
+func midnight(t time.Time, tz *time.Location) time.Time {
+	t = t.In(tz)
+	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
 }
 
 func getEventTime(start *calendar.EventDateTime, location *time.Location) (time.Time, error) {
@@ -91,7 +144,7 @@ func getEventTime(start *calendar.EventDateTime, location *time.Location) (time.
 		return time.ParseInLocation(time.DateOnly, start.Date, location)
 	}
 	if start.DateTime != "" {
-		return time.Parse(time.RFC3339, start.DateTime)
+		return time.ParseInLocation(time.RFC3339, start.DateTime, location)
 	}
 	return time.UnixMicro(0), errors.New("no date found on event")
 }
