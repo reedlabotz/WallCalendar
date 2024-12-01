@@ -1,3 +1,4 @@
-This is a simple hello, world demonstration web server.
+Calendar
 
-It serves version information on /version and answers any other request like /name by saying "Hello, name!".
+To bulid for raspberrypi:
+`env GOOS=linux GOARCH=arm GOARM=6 go build`
