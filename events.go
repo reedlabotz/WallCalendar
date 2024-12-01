@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -81,7 +80,7 @@ func (e Event) StartTimeShort(tz *time.Location) string {
 	return e.StartTime.In(tz).Format(fmt)
 }
 
-func FetchEvents(today time.Time, tz *time.Location) (map[time.Time][]Event, time.Time, time.Time) {
+func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[time.Time][]Event, time.Time, time.Time) {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
 	if err != nil {
@@ -106,7 +105,7 @@ func FetchEvents(today time.Time, tz *time.Location) (map[time.Time][]Event, tim
 
 	dateMap := make(map[time.Time][]Event)
 
-	events, err := srv.Events.List("family01175849838019336469@group.calendar.google.com").ShowDeleted(false).
+	events, err := srv.Events.List(calendarId).ShowDeleted(false).
 		SingleEvents(true).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).OrderBy("startTime").Do()
 	if err != nil {
 		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
@@ -137,16 +136,6 @@ func startOfDayOfWeek(date time.Time, location *time.Location) time.Time {
 func midnight(t time.Time, tz *time.Location) time.Time {
 	t = t.In(tz)
 	return time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, tz)
-}
-
-func getEventTime(start *calendar.EventDateTime, location *time.Location) (time.Time, error) {
-	if start.Date != "" {
-		return time.ParseInLocation(time.DateOnly, start.Date, location)
-	}
-	if start.DateTime != "" {
-		return time.ParseInLocation(time.RFC3339, start.DateTime, location)
-	}
-	return time.UnixMicro(0), errors.New("no date found on event")
 }
 
 // Retrieve a token, saves the token, then returns the generated client.

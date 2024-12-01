@@ -60,7 +60,7 @@ func main() {
 		today = midnight(today, newYork)
 	}
 
-	dateMap, start, lastday := FetchEvents(today, newYork)
+	dateMap, start, lastday := FetchEvents(today, "family01175849838019336469@group.calendar.google.com", newYork)
 	goMono := loadFont(gomono.TTF)
 	unifontMono := loadFontFile("fonts/UnifontExMono.ttf")
 
