@@ -2,9 +2,11 @@ package main
 
 import (
 	"fmt"
+	"strings"
 	"time"
 	"wallcalendar/canvas"
 
+	"github.com/lovelydeng/gomoji"
 	"golang.org/x/image/font"
 )
 
@@ -71,6 +73,24 @@ func (c Calendar) RenderDayHeaders() {
 	}
 }
 
+func (c Calendar) drawCarryoverLine(e Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool) {
+	w := columnWidth
+	if e.EndsOnDate(date, c.tz) {
+		w -= cellPadding
+		c.canv.DrawHorizontalArrow(x, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red, canvas.ArrowRight)
+	} else {
+		left := x
+		if column == 0 && dropLeftMargin {
+			left -= margin
+			w += margin
+		}
+		if column == 6 {
+			w += margin
+		}
+		c.canv.DrawHorizontalLine(left, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red)
+	}
+}
+
 func (c Calendar) Render(col int, row int, date time.Time, events []Event, isToday bool) {
 	columnWidth := c.ColumnWidth()
 	rowHeight := c.RowHeight()
@@ -90,35 +110,50 @@ func (c Calendar) Render(col int, row int, date time.Time, events []Event, isTod
 	c.canv.DrawString(date.Format("2"), boxLeft+cellPadding, boxTop+c.dateFace.Metrics().Height.Ceil()+cellPadding, columnWidth, c.dateFace, canvas.Black, canvas.Left)
 
 	y := boxTop + 55
+	isFirstCalendarDay := row == 0 && col == 0
 	for _, e := range events {
-		if !e.StartsOnDate(date, c.tz) {
-			w := columnWidth
-			if e.EndsOnDate(date, c.tz) {
-				w -= cellPadding
-				c.canv.DrawHorizontalArrow(boxLeft, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red)
-			} else {
-				left := boxLeft
-				if col == 0 {
-					left -= margin
-					w += margin
-				}
-				if col == 6 {
-					w += margin
-				}
-				c.canv.DrawHorizontalLine(left, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red)
-			}
+		startsToday := e.StartsOnDate(date, c.tz)
+		if !startsToday && !isFirstCalendarDay {
+			c.drawCarryoverLine(e, boxLeft, y, columnWidth, date, col, true)
 		} else {
 			timePart := ""
-			if !e.IsAllDayEvent {
-				timePart = e.StartTimeShort(c.tz) + " "
+			redSpan := 0
+			if !startsToday {
+				// Add spacing for continuation arrow
+				timePart += "  "
+				c.canv.DrawHorizontalArrow(boxLeft+cellPadding, y-c.eventFace.Metrics().Ascent.Ceil()/2, int(1.5*float64(font.MeasureString(c.eventFace, " ").Ceil())), canvas.Red, canvas.ArrowLeft)
 			}
-			height, widths := c.canv.DrawString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, canvas.Black, canvas.Left)
-			if !e.EndsOnDate(e.StartTime, c.tz) {
-				w := columnWidth - cellPadding - widths[0]
-				if col == 6 {
-					w += margin
+			if !e.IsAllDayEvent && startsToday {
+				timePart += e.StartTimeShort(c.tz) + " "
+			}
+			redSpan = len(timePart)
+			firstWord := strings.Split(e.Summary, " ")[0]
+			if gomoji.ContainsEmoji(firstWord) {
+				redSpan += len(firstWord)
+			}
+			var cols []canvas.ColorSpan
+			if redSpan == 0 {
+				cols = []canvas.ColorSpan{
+					{
+						Start: 0,
+						Color: canvas.Black,
+					},
 				}
-				c.canv.DrawHorizontalLine(boxLeft+cellPadding+widths[0], y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red)
+			} else {
+				cols = []canvas.ColorSpan{
+					{
+						Start: 0,
+						Color: canvas.Red,
+					},
+					{
+						Start: redSpan,
+						Color: canvas.Black,
+					},
+				}
+			}
+			height, widths := c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
+			if !e.EndsOnDate(e.StartTime, c.tz) {
+				c.drawCarryoverLine(e, boxLeft+cellPadding+widths[0], y, columnWidth-cellPadding-widths[0], date, col, false)
 			}
 			y += height
 		}

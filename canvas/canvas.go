@@ -6,7 +6,6 @@ import (
 	"image/draw"
 	"strings"
 
-	"github.com/lovelydeng/gomoji"
 	"golang.org/x/image/font"
 	"golang.org/x/image/math/fixed"
 )
@@ -43,12 +42,24 @@ func (c Canvas) DrawHorizontalLine(x int, y int, width int, color Color) {
 	}
 }
 
-func (c Canvas) DrawHorizontalArrow(x int, y int, width int, color Color) {
+type ArrowDirection bool
+
+const (
+	ArrowLeft  ArrowDirection = true
+	ArrowRight ArrowDirection = false
+)
+
+func (c Canvas) DrawHorizontalArrow(x int, y int, width int, color Color, direction ArrowDirection) {
 	c.DrawHorizontalLine(x, y, width, color)
 	for i := 1; i < 5; i++ {
 		for j := 0; j < i; j++ {
-			c.dst.Set(x+width-1-i, y+i-j, color.ToColor())
-			c.dst.Set(x+width-1-i, y-i+j, color.ToColor())
+			if direction == ArrowRight {
+				c.dst.Set(x+width-1-i, y+i-j, color.ToColor())
+				c.dst.Set(x+width-1-i, y-i+j, color.ToColor())
+			} else {
+				c.dst.Set(x+i, y+i-j, color.ToColor())
+				c.dst.Set(x+i, y-i+j, color.ToColor())
+			}
 		}
 	}
 }
@@ -60,10 +71,14 @@ const (
 	Center
 )
 
-func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color, a Alignment) (int, []int) {
+type ColorSpan struct {
+	Start int
+	Color Color
+}
+
+func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face, cols []ColorSpan, a Alignment) (int, []int) {
 	d := &font.Drawer{
 		Dst:  c.dst,
-		Src:  col.ToImage(),
 		Face: f,
 	}
 	sw := font.MeasureString(f, s)
@@ -81,11 +96,14 @@ func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color
 
 	words := strings.Split(s, " ")
 	widths := []int{}
+	colorIndex := 0
+	stringIndex := 0
 	for _, word := range words {
-		if gomoji.ContainsEmoji(word) {
-			d.Src = Red.ToImage()
-		} else {
-			d.Src = col.ToImage()
+		if colorIndex < len(cols) {
+			if cols[colorIndex].Start <= stringIndex {
+				d.Src = cols[colorIndex].Color.ToImage()
+				colorIndex += 1
+			}
 		}
 		width := font.MeasureString(f, word)
 		if d.Dot.X+width-fixed.I(x) > fixed.I(w) {
@@ -94,9 +112,20 @@ func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color
 			d.Dot.Y += fixed.I(f.Metrics().Height.Ceil())
 		}
 		d.DrawString(word + " ")
+		stringIndex += len(word + " ")
 	}
 	widths = append(widths, d.Dot.X.Round()-x)
 	return d.Dot.Y.Round() - y, widths
+}
+
+func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color, a Alignment) (int, []int) {
+	cols := []ColorSpan{
+		{
+			Start: 0,
+			Color: col,
+		},
+	}
+	return c.DrawMultiColorString(s, x, y, w, f, cols, a)
 }
 
 func (c Canvas) DrawCircle(x int, y int, radius int, col Color) {
