@@ -1,6 +1,6 @@
 #!/bin/bash
 
-/home/reedlabotz/12.48inch_e-Paper_Module_Code/c/epd
+# /home/reedlabotz/12.48inch_e-Paper_Module_Code/c/epd
 cd /home/reedlabotz
 ./wallcalendar --battery="$(echo "get battery" | nc -q 0 127.0.0.1 8423)"
 

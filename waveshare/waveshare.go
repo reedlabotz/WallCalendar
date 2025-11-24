@@ -71,7 +71,7 @@ func Initialize() {
 	m2s2ResetPin.Mode(rpio.Output)
 
 	m1s1DcPin.Mode(rpio.Output)
-	m1s1DcPin.Mode(rpio.Output)
+	m2s2DcPin.Mode(rpio.Output)
 
 	m1CsPin.Mode(rpio.Output)
 	s1CsPin.Mode(rpio.Output)
