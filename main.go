@@ -98,12 +98,106 @@ func main() {
 	}
 
 	c.RenderDayHeaders()
+	
+	// Calculate required height for each week
+	slotHeights := make([]map[int]int, numWeeks)
+	requiredHeights := make([]int, numWeeks)
+	totalRequiredHeight := 0
+	
+	// Standard face for measurement - MUST MATCH NewCalendar eventFace (unifontMono, 16)
+	face := truetype.NewFace(unifontMono, &truetype.Options{
+		Size:    16,
+		DPI:     72,
+		Hinting: font.HintingFull,
+	})
+	
+	for i := 0; i < numWeeks; i++ {
+		slotHeights[i] = make(map[int]int)
+		maxSlot := -1
+		
+		for j := 0; j < 7; j++ {
+			date := start.AddDate(0, 0, 7*i+j)
+			events := dateMap[date]
+			for _, e := range events {
+				if e.Slot > maxSlot {
+					maxSlot = e.Slot
+				}
+				
+				text := e.Summary
+				startsToday := e.StartsOnDate(date, newYork)
+				if !e.IsAllDayEvent && startsToday {
+					text = e.StartTimeShort(newYork) + " " + text
+				}
+				if !startsToday {
+					text = "  " + text
+				}
+				
+				w := c.ColumnWidth() - 10
+				h := canv.MeasureMultiColorString(text, w, face)
+				
+				if h > slotHeights[i][e.Slot] {
+					slotHeights[i][e.Slot] = h
+				}
+			}
+		}
+		
+		// Calculate total height for this week
+		// Header offset (55) + padding
+		weekHeight := 55
+		eventPadding := int(float64(face.Metrics().Height.Round()) * 0.5)
+		
+		for s := 0; s <= maxSlot; s++ {
+			if h, ok := slotHeights[i][s]; ok {
+				weekHeight += h + eventPadding
+			} else {
+				weekHeight += face.Metrics().Height.Ceil() + eventPadding
+			}
+		}
+		// Add a bit of bottom padding
+		weekHeight += 10
+		
+		requiredHeights[i] = weekHeight
+		totalRequiredHeight += weekHeight
+	}
+	
+	fmt.Printf("Required Heights: %v\n", requiredHeights)
+	fmt.Printf("Total Required: %d\n", totalRequiredHeight)
+	
+	// Distribute available height
+	// Total available height = 984 - headerHeight (140) - margin (8) = 836
+	availableHeight := 984 - 140 - 8
+	finalHeights := make([]int, numWeeks)
+	
+	// If we have enough space, give everyone what they need + extra
+	if totalRequiredHeight <= availableHeight {
+		extra := availableHeight - totalRequiredHeight
+		for i := 0; i < numWeeks; i++ {
+			finalHeights[i] = requiredHeights[i] + extra/numWeeks
+		}
+	} else {
+		// Not enough space, distribute proportionally
+		currentY := 0
+		for i := 0; i < numWeeks; i++ {
+			// Use float math for better precision then round
+			h := int(float64(requiredHeights[i]) / float64(totalRequiredHeight) * float64(availableHeight))
+			finalHeights[i] = h
+			// Adjust last one to fill exactly
+			if i == numWeeks-1 {
+				finalHeights[i] = availableHeight - currentY
+			}
+			currentY += h
+		}
+	}
+	
+	fmt.Printf("Final Heights: %v\n", finalHeights)
 
+	currentY := 140 + 8 // headerHeight + margin
 	for i := 0; i < numWeeks; i++ {
 		for j := 0; j < 7; j++ {
 			date := start.AddDate(0, 0, 7*i+j)
-			c.Render(j, i, date, dateMap[date], date == today)
+			c.Render(j, i, date, dateMap[date], date == today, slotHeights[i], currentY, finalHeights[i])
 		}
+		currentY += finalHeights[i]
 	}
 
 	batteryParts := strings.Split(*battery, " ")

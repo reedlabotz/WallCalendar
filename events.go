@@ -16,10 +16,12 @@ import (
 )
 
 type Event struct {
+	ID            string
 	Summary       string
 	StartTime     time.Time
 	EndTime       time.Time
 	IsAllDayEvent bool
+	Slot          int
 }
 
 func getTime(dateTime *calendar.EventDateTime, tz *time.Location, isEnd bool) (time.Time, error) {
@@ -51,10 +53,12 @@ func NewEvent(e *calendar.Event, tz *time.Location) (Event, error) {
 		return Event{}, err
 	}
 	return Event{
+		ID:            e.Id,
 		Summary:       e.Summary,
 		StartTime:     start,
 		EndTime:       end,
 		IsAllDayEvent: e.Start.Date != "",
+		Slot:          -1,
 	}, nil
 }
 
@@ -80,7 +84,7 @@ func (e Event) StartTimeShort(tz *time.Location) string {
 	return e.StartTime.In(tz).Format(fmt)
 }
 
-func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[time.Time][]Event, time.Time, time.Time) {
+func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[time.Time][]*Event, time.Time, time.Time) {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
 	if err != nil {
@@ -103,7 +107,8 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[tim
 	end := start.AddDate(0, 0, numWeeks*7)
 	lastday := end.AddDate(0, 0, -1)
 
-	dateMap := make(map[time.Time][]Event)
+	dateMap := make(map[time.Time][]*Event)
+	var allEvents []*Event
 
 	events, err := srv.Events.List(calendarId).ShowDeleted(false).
 		SingleEvents(true).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).OrderBy("startTime").Do()
@@ -116,11 +121,89 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[tim
 	} else {
 		for _, item := range events.Items {
 			e, _ := NewEvent(item, tz)
+			ePtr := &e
+			allEvents = append(allEvents, ePtr)
+
 			roundedDate := midnight(e.StartTime, tz)
 			roundedEndDate := midnight(e.EndTime, tz)
-			dateMap[roundedDate] = append(dateMap[roundedDate], e)
+			dateMap[roundedDate] = append(dateMap[roundedDate], ePtr)
 			for roundedDate = roundedDate.Add(24 * time.Hour); roundedDate.Compare(roundedEndDate) <= 0; roundedDate = roundedDate.Add(24 * time.Hour) {
-				dateMap[roundedDate] = append(dateMap[roundedDate], e)
+				dateMap[roundedDate] = append(dateMap[roundedDate], ePtr)
+			}
+		}
+	}
+
+	// Assign slots
+	// We need to iterate day by day.
+	// For each day, we look at the events on that day.
+	// If an event already has a slot assigned (from a previous day), we respect it.
+	// If not, we find the first available slot that is free for the duration of the event (or at least for the days we are rendering).
+
+	// To do this efficiently, we can keep track of slot usage per day.
+	// map[time.Time]map[int]bool -> day -> slotIndex -> occupied
+
+	slotUsage := make(map[time.Time]map[int]bool)
+
+	// Initialize slotUsage for all days in range
+	curr := start
+	for !curr.After(lastday) {
+		slotUsage[curr] = make(map[int]bool)
+		curr = curr.AddDate(0, 0, 1)
+	}
+
+	// Iterate through all events. Since they are sorted by start time (from API), we process earlier events first.
+	// However, the API sort might not be strictly what we want for multi-day vs single day.
+	// Usually, longer events starting on the same day should be processed first or standard layout algorithms apply.
+	// For simplicity, we process in the order returned.
+
+	for _, e := range allEvents {
+		// Find the days this event covers within our view
+		var days []time.Time
+		s := midnight(e.StartTime, tz)
+		if s.Before(start) {
+			s = start
+		}
+		f := midnight(e.EndTime, tz)
+		if f.After(lastday) {
+			f = lastday
+		}
+
+		// Collect days
+		iter := s
+		for !iter.After(f) {
+			days = append(days, iter)
+			iter = iter.AddDate(0, 0, 1)
+		}
+
+		if len(days) == 0 {
+			continue
+		}
+
+		// Find a slot that is free for ALL 'days'
+		slot := 0
+		for {
+			isFree := true
+			for _, day := range days {
+				if used, ok := slotUsage[day]; ok {
+					if used[slot] {
+						isFree = false
+						break
+					}
+				}
+			}
+			if isFree {
+				break
+			}
+			slot++
+		}
+
+		// Assign slot
+		e.Slot = slot
+
+		// Mark as used
+		for _, day := range days {
+			if _, ok := slotUsage[day]; ok {
+				slotUsage[day][slot] = true
 			}
 		}
 	}

@@ -73,7 +73,7 @@ func (c Calendar) RenderDayHeaders() {
 	}
 }
 
-func (c Calendar) drawCarryoverLine(e Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool) {
+func (c Calendar) drawCarryoverLine(e *Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool) {
 	w := columnWidth
 	if e.EndsOnDate(date, c.tz) {
 		w -= cellPadding
@@ -91,12 +91,11 @@ func (c Calendar) drawCarryoverLine(e Event, x int, y int, columnWidth int, date
 	}
 }
 
-func (c Calendar) Render(col int, row int, date time.Time, events []Event, isToday bool) {
+func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isToday bool, slotHeights map[int]int, rowY int, rowHeight int) {
 	columnWidth := c.ColumnWidth()
-	rowHeight := c.RowHeight()
 
 	boxLeft := margin + columnWidth*col
-	boxTop := margin + rowHeight*row + headerHeight
+	boxTop := rowY
 
 	c.canv.DrawHorizontalLine(boxLeft+cellPadding, boxTop, columnWidth-cellPadding*2, canvas.Black)
 
@@ -109,9 +108,28 @@ func (c Calendar) Render(col int, row int, date time.Time, events []Event, isTod
 	}
 	c.canv.DrawString(date.Format("2"), boxLeft+cellPadding, boxTop+c.dateFace.Metrics().Height.Ceil()+cellPadding, columnWidth, c.dateFace, canvas.Black, canvas.Left)
 
-	y := boxTop + 55
+	baseY := boxTop + 55
+	// Padding between events
+	eventPadding := int(float64(c.eventFace.Metrics().Height.Round()) * 0.5)
+
 	isFirstCalendarDay := row == 0 && col == 0
 	for _, e := range events {
+		// Calculate y based on slot heights
+		y := baseY
+		for i := 0; i < e.Slot; i++ {
+			if h, ok := slotHeights[i]; ok {
+				y += h + eventPadding
+			} else {
+				// Fallback if slot height not found (shouldn't happen if logic is correct)
+				y += c.eventFace.Metrics().Height.Ceil() + eventPadding
+			}
+		}
+
+		// Check if y is out of bounds for the cell
+		if y+slotHeights[e.Slot] > boxTop+rowHeight {
+			continue // Skip rendering if it overflows the cell
+		}
+
 		startsToday := e.StartsOnDate(date, c.tz)
 		if !startsToday && !isFirstCalendarDay {
 			c.drawCarryoverLine(e, boxLeft, y, columnWidth, date, col, true)
@@ -151,14 +169,11 @@ func (c Calendar) Render(col int, row int, date time.Time, events []Event, isTod
 					},
 				}
 			}
-			height, widths := c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
+			_, widths := c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
 			if !e.EndsOnDate(e.StartTime, c.tz) {
 				c.drawCarryoverLine(e, boxLeft+cellPadding+widths[0], y, columnWidth-cellPadding-widths[0], date, col, false)
 			}
-			y += height
 		}
-		y += int(float64(c.eventFace.Metrics().Height.Round()) * 1.5)
-
 	}
 }
 
