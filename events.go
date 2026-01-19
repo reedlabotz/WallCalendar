@@ -7,6 +7,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -96,6 +97,7 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[tim
 	if err != nil {
 		log.Fatalf("Unable to parse client secret file to config: %v", err)
 	}
+	config.RedirectURL = "http://localhost:8080"
 	client := getClient(config)
 
 	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
@@ -237,14 +239,33 @@ func getClient(config *oauth2.Config) *http.Client {
 
 // Request a token from the web, then returns the retrieved token.
 func getTokenFromWeb(config *oauth2.Config) *oauth2.Token {
-	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
-	fmt.Printf("Go to the following link in your browser then type the "+
-		"authorization code: \n%v\n", authURL)
+	codeCh := make(chan string)
 
-	var authCode string
-	if _, err := fmt.Scan(&authCode); err != nil {
-		log.Fatalf("Unable to read authorization code: %v", err)
-	}
+	mux := http.NewServeMux()
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+		code := r.URL.Query().Get("code")
+		if code != "" {
+			fmt.Fprintf(w, "Authentication successful! You can close this window.")
+			codeCh <- code
+		}
+	})
+
+	server := &http.Server{Addr: ":8080", Handler: mux}
+
+	go func() {
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("HTTP server ListenAndServe: %v", err)
+		}
+	}()
+
+	authURL := config.AuthCodeURL("state-token", oauth2.AccessTypeOffline)
+	fmt.Printf("Go to the following link in your browser if it doesn't open automatically: \n%v\n", authURL)
+
+	// Try to open the browser
+	_ = exec.Command("open", authURL).Start()
+
+	authCode := <-codeCh
+	server.Shutdown(context.Background())
 
 	tok, err := config.Exchange(context.TODO(), authCode)
 	if err != nil {
