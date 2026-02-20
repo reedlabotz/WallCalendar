@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
@@ -15,6 +16,7 @@ import (
 	"github.com/furconz/freetype/truetype"
 	"golang.org/x/image/font"
 	"golang.org/x/image/font/gofont/gomono"
+	"golang.org/x/oauth2/google"
 )
 
 const (
@@ -42,7 +44,13 @@ func main() {
 	clearScreen := flag.Bool("clear_screen", false, "Clear the screen")
 	dateOverride := flag.String("date_override", "", "Date to use as today, e.g. 2024-11-21")
 	battery := flag.String("battery", "battery: 80", "Battery output from pisugar")
+	bootstrap := flag.Bool("bootstrap", false, "Run Google OAuth bootstrap flow")
 	flag.Parse()
+
+	if *bootstrap {
+		runBootstrap()
+		return
+	}
 
 	cfg, err := LoadConfig("config.yaml")
 	if err != nil {
@@ -70,7 +78,7 @@ func main() {
 		today = midnight(today, newYork)
 	}
 
-	dateMap, start, lastday := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks)
+	dateMap, start, lastday := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks, cfg.Google.Token)
 
 	weatherMap, err := FetchWeather(cfg.Location.Latitude, cfg.Location.Longitude, cfg.Location.Timezone, cfg.Weather.TempUnit)
 	if err != nil {
@@ -256,4 +264,37 @@ func main() {
 		waveshare.Display(img)
 		waveshare.Sleep()
 	}
+
+	if err := PublishToHomeAssistant(num, *cfg); err != nil {
+		fmt.Printf("Error publishing to Home Assistant: %v\n", err)
+	}
+}
+
+func runBootstrap() {
+	b, err := os.ReadFile("credentials.json")
+	if err != nil {
+		fmt.Printf("Unable to read client secret file: %v\n", err)
+		fmt.Println("Please make sure credentials.json is present in the current directory.")
+		return
+	}
+
+	config, err := google.ConfigFromJSON(b, "https://www.googleapis.com/auth/calendar.readonly")
+	if err != nil {
+		fmt.Printf("Unable to parse client secret file to config: %v\n", err)
+		return
+	}
+	config.RedirectURL = "http://localhost:8080"
+
+	tok := getTokenFromWeb(config)
+	tokBytes, err := json.Marshal(tok)
+	if err != nil {
+		fmt.Printf("Unable to marshal token: %v\n", err)
+		return
+	}
+
+	fmt.Println("\n--- GOOGLE TOKEN JSON ---")
+	fmt.Println(string(tokBytes))
+	fmt.Println("-------------------------")
+	fmt.Println("\nPlease copy the JSON string above and paste it into the 'google: token:' field in your config.yaml file.")
+	fmt.Println("Make sure it's inside quotes if it contains special characters, or use the literal block style in YAML.")
 }

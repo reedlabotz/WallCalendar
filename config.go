@@ -19,6 +19,17 @@ type Config struct {
 	Weather struct {
 		TempUnit string `yaml:"temp_unit"`
 	} `yaml:"weather"`
+	HomeAssistant struct {
+		MQTT struct {
+			Broker   string `yaml:"broker"`
+			Port     int    `yaml:"port"`
+			User     string `yaml:"user"`
+			Password string `yaml:"password"`
+		} `yaml:"mqtt"`
+	} `yaml:"home_assistant"`
+	Google struct {
+		Token string `yaml:"token"` // JSON string of the token
+	} `yaml:"google"`
 }
 
 func LoadConfig(path string) (*Config, error) {
