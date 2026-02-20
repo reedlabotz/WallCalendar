@@ -18,7 +18,7 @@ import (
 )
 
 const (
-	numWeeks = 4
+	numWeeks = 3
 )
 
 func loadFont(ttf []byte) *truetype.Font {
@@ -41,12 +41,22 @@ func main() {
 	onlyRenderImage := flag.Bool("only_render_image", false, "Only render the image, no screen")
 	clearScreen := flag.Bool("clear_screen", false, "Clear the screen")
 	dateOverride := flag.String("date_override", "", "Date to use as today, e.g. 2024-11-21")
-	battery := flag.String("battery", "", "Battery output from pisugar")
+	battery := flag.String("battery", "battery: 80", "Battery output from pisugar")
 	flag.Parse()
+
+	cfg, err := LoadConfig("config.yaml")
+	if err != nil {
+		fmt.Printf("Error loading config: %v\n", err)
+		return
+	}
 
 	img := waveshare.NewHorizontalLSB(image.Rect(0, 0, 1304, 984))
 
-	newYork, _ := time.LoadLocation("America/New_York")
+	newYork, err := time.LoadLocation(cfg.Location.Timezone)
+	if err != nil {
+		fmt.Printf("Error loading timezone: %v\n", err)
+		return
+	}
 
 	today := midnight(time.Now().In(newYork), newYork)
 
@@ -60,7 +70,12 @@ func main() {
 		today = midnight(today, newYork)
 	}
 
-	dateMap, start, lastday := FetchEvents(today, "family01175849838019336469@group.calendar.google.com", newYork)
+	dateMap, start, lastday := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks)
+
+	weatherMap, err := FetchWeather(cfg.Location.Latitude, cfg.Location.Longitude, cfg.Location.Timezone, cfg.Weather.TempUnit)
+	if err != nil {
+		fmt.Println("Error fetching weather:", err)
+	}
 	goMono := loadFont(gomono.TTF)
 	unifontMono := loadFontFile("fonts/UnifontExMono.ttf")
 
@@ -78,12 +93,17 @@ func main() {
 			Hinting: font.HintingFull,
 		}),
 		truetype.NewFace(unifontMono, &truetype.Options{
-			Size:    16,
+			Size:    18,
 			DPI:     72,
 			Hinting: font.HintingFull,
 		}),
 		truetype.NewFace(unifontMono, &truetype.Options{
-			Size:    11,
+			Size:    14, // Battery percentage font, smaller for smaller icon
+			DPI:     72,
+			Hinting: font.HintingFull,
+		}),
+		truetype.NewFace(unifontMono, &truetype.Options{
+			Size:    16, // Weather temperature font, slightly larger as requested
 			DPI:     72,
 			Hinting: font.HintingFull,
 		}),
@@ -98,23 +118,23 @@ func main() {
 	}
 
 	c.RenderDayHeaders()
-	
+
 	// Calculate required height for each week
 	slotHeights := make([]map[int]int, numWeeks)
 	requiredHeights := make([]int, numWeeks)
 	totalRequiredHeight := 0
-	
+
 	// Standard face for measurement - MUST MATCH NewCalendar eventFace (unifontMono, 16)
 	face := truetype.NewFace(unifontMono, &truetype.Options{
-		Size:    16,
+		Size:    18, // MATCH NewCalendar
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
-	
-	for i := 0; i < numWeeks; i++ {
+
+	for i := 0; i < cfg.Calendar.NumWeeks; i++ {
 		slotHeights[i] = make(map[int]int)
 		maxSlot := -1
-		
+
 		for j := 0; j < 7; j++ {
 			date := start.AddDate(0, 0, 7*i+j)
 			events := dateMap[date]
@@ -122,7 +142,7 @@ func main() {
 				if e.Slot > maxSlot {
 					maxSlot = e.Slot
 				}
-				
+
 				text := e.Summary
 				startsToday := e.StartsOnDate(date, newYork)
 				if !e.IsAllDayEvent && startsToday {
@@ -131,21 +151,21 @@ func main() {
 				if !startsToday {
 					text = "  " + text
 				}
-				
+
 				w := c.ColumnWidth() - 10
 				h := canv.MeasureMultiColorString(text, w, face)
-				
+
 				if h > slotHeights[i][e.Slot] {
 					slotHeights[i][e.Slot] = h
 				}
 			}
 		}
-		
+
 		// Calculate total height for this week
-		// Header offset (55) + padding
-		weekHeight := 55
+		// Header offset (85) + padding
+		weekHeight := 85
 		eventPadding := int(float64(face.Metrics().Height.Round()) * 0.5)
-		
+
 		for s := 0; s <= maxSlot; s++ {
 			if h, ok := slotHeights[i][s]; ok {
 				weekHeight += h + eventPadding
@@ -155,47 +175,57 @@ func main() {
 		}
 		// Add a bit of bottom padding
 		weekHeight += 10
-		
+
 		requiredHeights[i] = weekHeight
 		totalRequiredHeight += weekHeight
 	}
-	
-	fmt.Printf("Required Heights: %v\n", requiredHeights)
-	fmt.Printf("Total Required: %d\n", totalRequiredHeight)
-	
+
+	// fmt.Printf("Required Heights: %v\n", requiredHeights)
+	// fmt.Printf("Total Required: %d\n", totalRequiredHeight)
+
 	// Distribute available height
-	// Total available height = 984 - headerHeight (140) - margin (8) = 836
+	// Total available height = 1304 - headerHeight (140) - margin (8) = 836
 	availableHeight := 984 - 140 - 8
-	finalHeights := make([]int, numWeeks)
-	
+	finalHeights := make([]int, cfg.Calendar.NumWeeks)
+
 	// If we have enough space, give everyone what they need + extra
 	if totalRequiredHeight <= availableHeight {
 		extra := availableHeight - totalRequiredHeight
-		for i := 0; i < numWeeks; i++ {
-			finalHeights[i] = requiredHeights[i] + extra/numWeeks
+		for i := 0; i < cfg.Calendar.NumWeeks; i++ {
+			finalHeights[i] = requiredHeights[i] + extra/cfg.Calendar.NumWeeks
 		}
 	} else {
 		// Not enough space, distribute proportionally
 		currentY := 0
-		for i := 0; i < numWeeks; i++ {
+		for i := 0; i < cfg.Calendar.NumWeeks; i++ {
 			// Use float math for better precision then round
 			h := int(float64(requiredHeights[i]) / float64(totalRequiredHeight) * float64(availableHeight))
 			finalHeights[i] = h
 			// Adjust last one to fill exactly
-			if i == numWeeks-1 {
+			if i == cfg.Calendar.NumWeeks-1 {
 				finalHeights[i] = availableHeight - currentY
 			}
 			currentY += h
 		}
 	}
-	
-	fmt.Printf("Final Heights: %v\n", finalHeights)
+
+	// fmt.Printf("Final Heights: %v\n", finalHeights)
 
 	currentY := 140 + 8 // headerHeight + margin
-	for i := 0; i < numWeeks; i++ {
+	for i := 0; i < cfg.Calendar.NumWeeks; i++ {
 		for j := 0; j < 7; j++ {
 			date := start.AddDate(0, 0, 7*i+j)
-			c.Render(j, i, date, dateMap[date], date == today, slotHeights[i], currentY, finalHeights[i])
+			dateKey := date.Format("2006-01-02")
+			weather, ok := weatherMap[dateKey]
+			if !ok || i >= 2 {
+				// if i < 2 {
+				// 	fmt.Printf("No weather for %s\n", dateKey)
+				// }
+				weather = DailyWeather{}
+			} else {
+				// fmt.Printf("Found weather for %s: %.0f/%.0f\n", dateKey, weather.TempMax, weather.TempMin)
+			}
+			c.Render(j, i, date, dateMap[date], date == today, slotHeights[i], currentY, finalHeights[i], weather)
 		}
 		currentY += finalHeights[i]
 	}

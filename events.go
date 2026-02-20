@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 
 	"golang.org/x/oauth2"
@@ -53,9 +54,18 @@ func NewEvent(e *calendar.Event, tz *time.Location) (Event, error) {
 	if err != nil {
 		return Event{}, err
 	}
+	summary := e.Summary
+	// Strip variation selectors (U+FE00-U+FE0F) which render as boxes in Unifont
+	summary = strings.Map(func(r rune) rune {
+		if r >= 0xFE00 && r <= 0xFE0F {
+			return -1
+		}
+		return r
+	}, summary)
+
 	return Event{
 		ID:            e.Id,
-		Summary:       e.Summary,
+		Summary:       summary,
 		StartTime:     start,
 		EndTime:       end,
 		IsAllDayEvent: e.Start.Date != "",
@@ -85,7 +95,7 @@ func (e Event) StartTimeShort(tz *time.Location) string {
 	return e.StartTime.In(tz).Format(fmt)
 }
 
-func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[time.Time][]*Event, time.Time, time.Time) {
+func FetchEvents(today time.Time, calendarId string, tz *time.Location, numWeeks int) (map[time.Time][]*Event, time.Time, time.Time) {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
 	if err != nil {
@@ -118,9 +128,7 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location) (map[tim
 		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
 	}
 
-	if len(events.Items) == 0 {
-		fmt.Println("No upcoming events found.")
-	} else {
+	if len(events.Items) != 0 {
 		for _, item := range events.Items {
 			e, _ := NewEvent(item, tz)
 			ePtr := &e

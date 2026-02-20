@@ -36,9 +36,19 @@ func (c Color) ToImage() image.Image {
 	return image.NewUniform(c.ToColor())
 }
 
+func (c Canvas) SetPixel(x int, y int, col Color) {
+	c.dst.Set(x, y, col.ToColor())
+}
+
 func (c Canvas) DrawHorizontalLine(x int, y int, width int, color Color) {
-	for i := 0; i < width; i++ {
-		c.dst.Set(x+i, y, color.ToColor())
+	c.DrawThickHorizontalLine(x, y, width, 1, color)
+}
+
+func (c Canvas) DrawThickHorizontalLine(x int, y int, width int, thickness int, color Color) {
+	for t := 0; t < thickness; t++ {
+		for i := 0; i < width; i++ {
+			c.dst.Set(x+i, y+t-thickness/2, color.ToColor())
+		}
 	}
 }
 
@@ -69,6 +79,7 @@ type Alignment int
 const (
 	Left Alignment = iota + 1
 	Center
+	Right
 )
 
 type ColorSpan struct {
@@ -85,6 +96,11 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 	if a == Center {
 		d.Dot = fixed.Point26_6{
 			X: fixed.I(x) + (fixed.I(w)-sw)/2,
+			Y: fixed.I(y),
+		}
+	} else if a == Right {
+		d.Dot = fixed.Point26_6{
+			X: fixed.I(x) + (fixed.I(w) - sw),
 			Y: fixed.I(y),
 		}
 	} else {
@@ -137,7 +153,7 @@ func (c Canvas) MeasureMultiColorString(s string, w int, f font.Face) int {
 			d.Dot.Y += fixed.I(f.Metrics().Height.Ceil())
 		}
 		// Simulate drawing
-		d.Dot.X += font.MeasureString(f, word + " ")
+		d.Dot.X += font.MeasureString(f, word+" ")
 	}
 	// The height is the final Y + one line height (since we start at 0 and add height for new lines)
 	// Actually, DrawMultiColorString returns d.Dot.Y.Round() - y.
@@ -180,7 +196,7 @@ func (c Canvas) MeasureMultiColorString(s string, w int, f font.Face) int {
 			lines++
 			currentX = fixed.I(0)
 		}
-		currentX += font.MeasureString(f, word + " ")
+		currentX += font.MeasureString(f, word+" ")
 	}
 	return lines * f.Metrics().Height.Ceil()
 }
@@ -193,6 +209,75 @@ func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color
 		},
 	}
 	return c.DrawMultiColorString(s, x, y, w, f, cols, a)
+}
+
+func (c Canvas) DrawInvertedString(s string, x int, y int, w int, f font.Face, a Alignment) (int, []int) {
+	// Create a temporary mask to draw the text into
+	h := c.MeasureMultiColorString(s, w, f)
+	mask := image.NewAlpha(image.Rect(0, 0, w, h))
+	d := &font.Drawer{
+		Dst:  mask,
+		Src:  image.Black, // Full alpha
+		Face: f,
+	}
+
+	ascent := f.Metrics().Ascent.Ceil()
+	sw := font.MeasureString(f, s)
+	if a == Center {
+		d.Dot = fixed.Point26_6{
+			X: (fixed.I(w) - sw) / 2,
+			Y: fixed.I(ascent),
+		}
+	} else if a == Right {
+		d.Dot = fixed.Point26_6{
+			X: fixed.I(w) - sw,
+			Y: fixed.I(ascent),
+		}
+	} else {
+		d.Dot = fixed.Point26_6{
+			X: fixed.I(0),
+			Y: fixed.I(ascent),
+		}
+	}
+
+	words := strings.Split(s, " ")
+	for _, word := range words {
+		width := font.MeasureString(f, word)
+		if d.Dot.X+width > fixed.I(w) {
+			d.Dot.X = fixed.I(0)
+			d.Dot.Y += fixed.I(f.Metrics().Height.Ceil())
+		}
+		d.DrawString(word + " ")
+	}
+
+	// Apply inverted mask to dst
+	for my := 0; my < h; my++ {
+		for mx := 0; mx < w; mx++ {
+			// Use a threshold for alpha to avoid blurry edges on e-ink
+			if mask.AlphaAt(mx, my).A > 128 {
+				targetX := x + mx
+				targetY := y - ascent + my
+				if targetX >= 0 && targetX < c.Width() && targetY >= 0 && targetY < c.Height() {
+					c.invertAt(targetX, targetY)
+				}
+			}
+		}
+	}
+
+	return h, nil
+}
+
+func (c Canvas) invertAt(x, y int) {
+	curr := c.dst.At(x, y)
+	r, g, b, _ := curr.RGBA()
+	// Logic matches waveshare.convertBit
+	if r > g { // Red
+		c.dst.Set(x, y, White.ToColor())
+	} else if (r | g | b) >= 0x8000 { // White
+		c.dst.Set(x, y, Black.ToColor())
+	} else { // Black
+		c.dst.Set(x, y, White.ToColor())
+	}
 }
 
 func (c Canvas) DrawCircle(x int, y int, radius int, col Color) {
