@@ -180,23 +180,17 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 	// Apply thresholded mask to destination
 	for my := 0; my < totalHeight; my++ {
 		for mx := 0; mx < w; mx++ {
-			if mask.AlphaAt(mx, my).A > 128 {
-				// Find color for this pixel
-				// For multi-color strings, we need to know which word this pixel belongs to.
-				// This is getting complex. Let's simplify:
-				// Since we only have Black and Red, and Red usually comes first (time/emoji),
-				// let's just track which words were red and check bounds.
-
+			alpha := mask.AlphaAt(mx, my).A
+			if alpha > 0 {
 				targetX := x + mx
 				targetY := y - ascent + my
 
-				// Default to Black, check if it falls within any Red word's bounds
+				// Determine color for this pixel
 				pixelColor := Black
+				isRed := false
 				for _, l := range layoutLines {
 					for _, wi := range l.words {
 						if wi.color == Red {
-							// Rough check: is mx, my within this word?
-							// Ascent is relative to wi.y
 							if my >= wi.y-ascent && my < wi.y+(lineHeight-ascent) {
 								var xOffset fixed.Int26_6
 								if a == Center {
@@ -205,16 +199,32 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 									xOffset = fixed.I(w) - l.width
 								}
 								wordXStart := xOffset.Round() + wi.x
-								if mx >= wordXStart && mx < wordXStart+wi.width+1 { // +1 for safety
-									pixelColor = Red
+								if mx >= wordXStart && mx < wordXStart+wi.width+1 {
+									isRed = true
+									break
 								}
 							}
 						}
 					}
+					if isRed {
+						break
+					}
 				}
 
-				if targetX >= 0 && targetX < c.Width() && targetY >= 0 && targetY < c.Height() {
-					c.dst.Set(targetX, targetY, pixelColor.ToColor())
+				threshold := uint8(128)
+				if isRed {
+					threshold = 96 // Lower threshold for red to make it fuller
+					pixelColor = Red
+				}
+
+				if alpha > threshold {
+					if targetX >= 0 && targetX < c.Width() && targetY >= 0 && targetY < c.Height() {
+						c.dst.Set(targetX, targetY, pixelColor.ToColor())
+						// Fake bold for red: double pixels horizontally
+						if isRed && targetX+1 < c.Width() {
+							c.dst.Set(targetX+1, targetY, pixelColor.ToColor())
+						}
+					}
 				}
 			}
 		}
