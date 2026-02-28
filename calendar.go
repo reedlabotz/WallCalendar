@@ -46,7 +46,7 @@ func NewCalendar(
 }
 
 func (c Calendar) RenderMonth(m string) {
-	c.canv.DrawString(m, 0, 80, c.canv.Width(), c.monthFace, canvas.Black, canvas.Center)
+	c.canv.DrawString(m, 0, 80, c.canv.Width(), c.monthFace, canvas.Black, canvas.Center, 0)
 
 }
 
@@ -72,35 +72,28 @@ func (c Calendar) RenderDayHeaders() {
 	}
 
 	for i, day := range daysOfWeek {
-		c.canv.DrawString(day, margin+i*columnWidth, headerHeight, columnWidth, c.dateFace, canvas.Black, canvas.Center)
+		c.canv.DrawString(day, margin+i*columnWidth, headerHeight, columnWidth, c.dateFace, canvas.Black, canvas.Center, 0)
 	}
 }
 
-func (c Calendar) drawCarryoverBox(e *Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool, isEnd bool) {
-	w := columnWidth
-	h := c.eventFace.Metrics().Height.Ceil() + 8        // Increased padding for the box
-	boxY := y - c.eventFace.Metrics().Ascent.Ceil() - 3 // Padding: 3px top, 5px bottom (approx)
-
-	leftRounded := e.StartsOnDate(date, c.tz) || (column == 0 && !dropLeftMargin)
-	rightRounded := isEnd
-
-	// If it's a continuation from previous row, don't round left
-	if column == 0 && !e.StartsOnDate(date, c.tz) && dropLeftMargin {
-		leftRounded = false
-	}
+func (c Calendar) drawCarryoverBox(x int, y int, w int, h int, leftRounded bool, rightRounded bool, dropLeftMargin bool, dropRightMargin bool) {
+	// Add some vertical padding to the slot height for the box
+	padding := 12
+	boxH := h + padding
+	boxY := y - c.eventFace.Metrics().Ascent.Ceil() - (padding / 2)
 
 	// Adjust width and start for margins
 	startX := x
-	if column == 0 && dropLeftMargin {
+	if dropLeftMargin {
 		startX -= margin
 		w += margin
 	}
-	if column == 6 && !isEnd {
+	if dropRightMargin {
 		w += margin
 	}
 
 	// Multi-day events get a red box
-	c.canv.DrawPartialRoundedRectangle(startX, boxY, w, h, 8, canvas.Red, leftRounded, rightRounded)
+	c.canv.DrawPartialRoundedRectangle(startX, boxY, w, boxH, 8, canvas.Red, leftRounded, rightRounded)
 }
 
 func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isToday bool, slotHeights map[int]int, rowY int, rowHeight int, weather DailyWeather) {
@@ -119,7 +112,7 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 		c.canv.DrawCircle(left, top, 22, canvas.Red)
 		c.canv.DrawCircle(left, top, 18, canvas.White)
 	}
-	c.canv.DrawString(date.Format("2"), boxLeft+cellPadding, boxTop+c.dateFace.Metrics().Height.Ceil()+cellPadding, columnWidth, c.dateFace, canvas.Black, canvas.Left)
+	c.canv.DrawString(date.Format("2"), boxLeft+cellPadding, boxTop+c.dateFace.Metrics().Height.Ceil()+cellPadding, columnWidth, c.dateFace, canvas.Black, canvas.Left, 0)
 
 	// Render Weather
 	if weather.TempMax != 0 || weather.TempMin != 0 {
@@ -133,14 +126,13 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 		// Draw combined icon and text using dedicated weatherFace
 		// Align baseline to date number baseline (boxTop + cellPadding + height)
 		baselineY := boxTop + c.dateFace.Metrics().Height.Ceil() + cellPadding
-		c.canv.DrawString(weatherStr, weatherX, baselineY, weatherWidth, c.weatherFace, canvas.Black, canvas.Right)
+		c.canv.DrawString(weatherStr, weatherX, baselineY, weatherWidth, c.weatherFace, canvas.Black, canvas.Right, 0)
 	}
 
 	baseY := boxTop + 85 // Space before first event
 	// Padding between events
 	eventPadding := int(float64(c.eventFace.Metrics().Height.Round()) * 0.5)
 
-	isFirstCalendarDay := row == 0 && col == 0
 	for _, e := range events {
 		// Calculate y based on slot heights
 		y := baseY
@@ -162,19 +154,46 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 		endsOnDifferentDay := !e.EndsOnDate(e.StartTime, c.tz)
 
 		if endsOnDifferentDay {
-			isEnd := e.EndsOnDate(date, c.tz)
-			// Draw the multi-day box
-			c.drawCarryoverBox(e, boxLeft, y, columnWidth, date, col, !startsToday && !isFirstCalendarDay, isEnd)
+			// If it's the start of the event, OR the first day of the week, draw text and box for the whole span
+			if startsToday || (col == 0 && !e.StartTime.After(date)) {
+				// Calculate how many days we can span in this week
+				daysToWeekEnd := 7 - col
+				daysToEventEnd := int(e.EndTime.Sub(date).Hours()/24) + 1
+				spanDays := daysToWeekEnd
+				if daysToEventEnd < spanDays {
+					spanDays = daysToEventEnd
+				}
+				totalSpanWidth := spanDays * columnWidth
 
-			// If it's the start, or it's the first day we see in the calendar view, draw text
-			if startsToday || isFirstCalendarDay {
+				slotH := e.RowHeight
+				if slotH == 0 {
+					slotH = slotHeights[e.Slot]
+				}
+
+				isSpanStart := startsToday
+				isSpanEnd := (daysToEventEnd <= spanDays) // event ends in this week
+
+				leftRounded := isSpanStart
+				rightRounded := isSpanEnd
+
+				dropLeftMargin := false
+				if col == 0 && !isSpanStart {
+					dropLeftMargin = true
+				}
+
+				dropRightMargin := false
+				if (col+spanDays-1) == 6 && !isSpanEnd {
+					// Last column of the week, and it doesn't end this week
+					dropRightMargin = true
+				}
+
+				c.drawCarryoverBox(boxLeft, y, totalSpanWidth, slotH, leftRounded, rightRounded, dropLeftMargin, dropRightMargin)
+
 				text := e.Summary
 				if !e.IsAllDayEvent && startsToday {
 					text = e.StartTimeShort(c.tz) + " " + text
 				}
-				// Always LEFT align multi-day text inside the box.
-				// We add a bit of padding-left.
-				c.canv.DrawString(text, boxLeft+cellPadding+2, y, columnWidth-cellPadding*2-4, c.eventFace, canvas.Black, canvas.Left)
+				c.canv.DrawString(text, boxLeft+cellPadding+2, y, totalSpanWidth-cellPadding*2-4, c.eventFace, canvas.Black, canvas.Left, slotH)
 			}
 		} else {
 			// Normal single-day event
@@ -208,7 +227,7 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 					},
 				}
 			}
-			c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
+			c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left, slotHeights[e.Slot])
 		}
 	}
 }
@@ -220,7 +239,7 @@ func (c Calendar) RenderBatteryAndTime(battery float64) {
 
 func (c Calendar) RenderTime() {
 	// Offset from the corner to match margin and align with battery text
-	c.canv.DrawString(time.Now().In(c.tz).Format(time.Kitchen), margin, 28, 200, c.batteryFont, canvas.Black, canvas.Left)
+	c.canv.DrawString(time.Now().In(c.tz).Format(time.Kitchen), margin, 28, 200, c.batteryFont, canvas.Black, canvas.Left, 0)
 }
 
 func (c Calendar) RenderBattery(battery float64) {

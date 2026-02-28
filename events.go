@@ -24,6 +24,7 @@ type Event struct {
 	EndTime       time.Time
 	IsAllDayEvent bool
 	Slot          int
+	RowHeight     int
 }
 
 func getTime(dateTime *calendar.EventDateTime, tz *time.Location, isEnd bool) (time.Time, error) {

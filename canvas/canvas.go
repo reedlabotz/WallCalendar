@@ -53,6 +53,14 @@ func (c Canvas) DrawThickHorizontalLine(x int, y int, width int, thickness int, 
 	}
 }
 
+func (c Canvas) DrawThickVerticalLine(x int, y int, height int, thickness int, color Color) {
+	for t := 0; t < thickness; t++ {
+		for i := 0; i < height; i++ {
+			c.dst.Set(x+t-thickness/2, y+i, color.ToColor())
+		}
+	}
+}
+
 type ArrowDirection bool
 
 const (
@@ -88,7 +96,7 @@ type ColorSpan struct {
 	Color Color
 }
 
-func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face, cols []ColorSpan, a Alignment) (int, []int) {
+func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face, cols []ColorSpan, a Alignment, maxHeight int) (int, []int) {
 	// 1. Calculate height and wrap words to determine mask size
 	words := strings.Split(s, " ")
 	lineHeight := f.Metrics().Height.Ceil()
@@ -129,6 +137,28 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 		spaceWidth固定 := font.MeasureString(f, " ")
 
 		if currentDot.X+wordWidth固定 > fixed.I(w) && len(currentLine.words) > 0 {
+			// Check if adding another line would exceed maxHeight
+			if maxHeight > 0 && currentDot.Y.Round()+lineHeight > maxHeight {
+				// Current line is the last one allowed. Truncate it if it's the last word but doesn't fit?
+				// Actually, if we're here, we need to wrap. If wrapping exceeds maxHeight, truncate currentLine.
+				lastWordIdx := len(currentLine.words) - 1
+				if lastWordIdx >= 0 {
+					ellipsis := "..."
+					eWidth := font.MeasureString(f, ellipsis)
+					for lastWordIdx >= 0 {
+						wInfo := currentLine.words[lastWordIdx]
+						if fixed.I(wInfo.x)+font.MeasureString(f, wInfo.text)+eWidth <= fixed.I(w) {
+							currentLine.words[lastWordIdx].text += ellipsis
+							currentLine.width = fixed.I(wInfo.x) + font.MeasureString(f, currentLine.words[lastWordIdx].text)
+							break
+						}
+						currentLine.words = currentLine.words[:lastWordIdx]
+						lastWordIdx--
+					}
+				}
+				break
+			}
+
 			widths = append(widths, currentDot.X.Round())
 			layoutLines = append(layoutLines, currentLine)
 			currentLine = line{}
@@ -149,11 +179,19 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 		currentDot.X += wordWidth固定 + spaceWidth固定
 		stringIndex += len(word + " ")
 	}
-	widths = append(widths, currentDot.X.Round())
-	layoutLines = append(layoutLines, currentLine)
+	// Check if the final set of words exceeded maxHeight (though it shouldn't if loop break worked)
+	if maxHeight == 0 || currentDot.Y.Round() <= maxHeight {
+		widths = append(widths, currentDot.X.Round())
+		layoutLines = append(layoutLines, currentLine)
+	}
 
-	totalHeight := lines * lineHeight
-	mask := image.NewAlpha(image.Rect(0, 0, w, totalHeight))
+	calculatedHeight := (lines-1)*lineHeight + ascent + f.Metrics().Descent.Ceil()
+	renderHeight := calculatedHeight
+	if maxHeight > 0 && renderHeight > maxHeight {
+		renderHeight = maxHeight
+	}
+
+	mask := image.NewAlpha(image.Rect(0, 0, w, renderHeight))
 
 	// Second pass: Draw each line with alignment
 	for i, l := range layoutLines {
@@ -165,6 +203,9 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 		}
 
 		for _, wi := range l.words {
+			if wi.y > renderHeight {
+				continue
+			}
 			d := &font.Drawer{
 				Dst:  mask,
 				Src:  image.Black, // Alpha mask
@@ -178,7 +219,7 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 	}
 
 	// Apply thresholded mask to destination
-	for my := 0; my < totalHeight; my++ {
+	for my := 0; my < renderHeight; my++ {
 		for mx := 0; mx < w; mx++ {
 			alpha := mask.AlphaAt(mx, my).A
 			if alpha > 0 {
@@ -230,84 +271,44 @@ func (c Canvas) DrawMultiColorString(s string, x int, y int, w int, f font.Face,
 		}
 	}
 
-	return totalHeight - lineHeight, widths
+	return renderHeight, widths
 }
 
 func (c Canvas) MeasureMultiColorString(s string, w int, f font.Face) int {
-	// We use a dummy drawer just to measure
+	lineHeight := f.Metrics().Height.Ceil()
+	ascent := f.Metrics().Ascent.Ceil()
+	descent := f.Metrics().Descent.Ceil()
+
 	d := &font.Drawer{
 		Face: f,
 	}
-	// Starting dot doesn't matter much for height relative to start, but let's keep it simple
 	d.Dot = fixed.Point26_6{
 		X: fixed.I(0),
-		Y: fixed.I(0),
+		Y: fixed.I(ascent),
 	}
 
+	lines := 1
 	words := strings.Split(s, " ")
 	for _, word := range words {
 		width := font.MeasureString(f, word)
 		if d.Dot.X+width > fixed.I(w) {
 			d.Dot.X = fixed.I(0)
-			d.Dot.Y += fixed.I(f.Metrics().Height.Ceil())
+			d.Dot.Y += fixed.I(lineHeight)
+			lines++
 		}
-		// Simulate drawing
 		d.Dot.X += font.MeasureString(f, word+" ")
 	}
-	// The height is the final Y + one line height (since we start at 0 and add height for new lines)
-	// Actually, DrawMultiColorString returns d.Dot.Y.Round() - y.
-	// If we start at y=0, it returns d.Dot.Y.Round().
-	// However, the first line sits at y=0 (baseline? no, usually top-left for this canvas lib?).
-	// Let's look at DrawMultiColorString:
-	// It adds Height.Ceil() when wrapping.
-	// So if 1 line, Y is 0. Return is 0?
-	// Wait, DrawMultiColorString returns `d.Dot.Y.Round() - y`.
-	// If no wrap, Y stays at y. Return is 0.
-	// But the caller usually adds `height` to `y`.
-	// If return is 0, `y += 0`. That seems wrong for the next event.
-	// Ah, `DrawMultiColorString` logic in `canvas.go`:
-	// `d.Dot.Y += fixed.I(f.Metrics().Height.Ceil())` on wrap.
-	// So if 1 line, Y is unchanged.
-	// But `Render` does `y += height`.
-	// If height is 0, lines overlap.
-	// Let's check `Render` in `calendar.go` before this change.
-	// `height, widths := c.canv.DrawMultiColorString(...)`
-	// `y += height`
-	// `y += int(float64(c.eventFace.Metrics().Height.Round()) * 1.5)`
-	// So `height` is the *additional* height from wrapping?
-	// If `DrawMultiColorString` returns 0 for single line, then `y` increments by the fixed amount (1.5 * line height).
-	// So `MeasureMultiColorString` should return the *additional* height too?
-	// Or should it return the *total* height?
-	// The plan says "calculate the maximum height required".
-	// If I want total height, I should probably return (lines * line_height).
-	// Let's stick to what DrawMultiColorString returns for consistency, but we need to know the *total* visual height to reserve space.
-	// Actually, `DrawMultiColorString` returns the Y delta.
-	// If I have 2 lines, Y increases by 1 line height.
-	// So return value is `(lines - 1) * lineHeight`.
-	// We probably want the full height: `lines * lineHeight`.
-	// Let's adjust `MeasureMultiColorString` to return the full height in pixels.
-
-	lines := 1
-	currentX := fixed.I(0)
-	for _, word := range words {
-		width := font.MeasureString(f, word)
-		if currentX+width > fixed.I(w) {
-			lines++
-			currentX = fixed.I(0)
-		}
-		currentX += font.MeasureString(f, word+" ")
-	}
-	return lines * f.Metrics().Height.Ceil()
+	return (lines-1)*lineHeight + ascent + descent
 }
 
-func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color, a Alignment) (int, []int) {
+func (c Canvas) DrawString(s string, x int, y int, w int, f font.Face, col Color, a Alignment, maxHeight int) (int, []int) {
 	cols := []ColorSpan{
 		{
 			Start: 0,
 			Color: col,
 		},
 	}
-	return c.DrawMultiColorString(s, x, y, w, f, cols, a)
+	return c.DrawMultiColorString(s, x, y, w, f, cols, a, maxHeight)
 }
 
 func (c Canvas) DrawInvertedString(s string, x int, y int, w int, f font.Face, a Alignment) (int, []int) {
@@ -394,18 +395,31 @@ func (c Canvas) DrawPartialRoundedRectangle(x, y, w, h, radius int, col Color, l
 		endX -= radius
 	}
 
-	for i := startX; i < endX; i++ {
-		c.dst.Set(i, y, col.ToColor())
-		c.dst.Set(i, y+h-1, col.ToColor())
+	if endX > startX {
+		// Manual loops instead of draw.Draw to be sure it works with HorizontalLSB
+		for x := startX; x < endX; x++ {
+			c.dst.Set(x, y, col.ToColor())
+			c.dst.Set(x, y+1, col.ToColor()) // 2px thick
+			c.dst.Set(x, y+h-1, col.ToColor())
+			c.dst.Set(x, y+h-2, col.ToColor()) // 2px thick
+		}
 	}
 
-	// Left and right lines
-	for j := y + radius; j < y+h-radius; j++ {
+	// Left and right lines - only if rounded (otherwise they catch the edge)
+	startY := y + radius
+	endY := y + h - radius
+	if endY > startY {
 		if leftRounded {
-			c.dst.Set(x, j, col.ToColor())
+			for yP := startY; yP < endY; yP++ {
+				c.dst.Set(x, yP, col.ToColor())
+				c.dst.Set(x+1, yP, col.ToColor()) // 2px thick
+			}
 		}
 		if rightRounded {
-			c.dst.Set(x+w-1, j, col.ToColor())
+			for yP := startY; yP < endY; yP++ {
+				c.dst.Set(x+w-1, yP, col.ToColor())
+				c.dst.Set(x+w-2, yP, col.ToColor()) // 2px thick
+			}
 		}
 	}
 

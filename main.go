@@ -139,9 +139,12 @@ func main() {
 		Hinting: font.HintingFull,
 	})
 
+	canonicalHeights := make(map[string]int)
+
 	for i := 0; i < cfg.Calendar.NumWeeks; i++ {
 		slotHeights[i] = make(map[int]int)
 		maxSlot := -1
+		measuredInWeek := make(map[string]bool)
 
 		for j := 0; j < 7; j++ {
 			date := start.AddDate(0, 0, 7*i+j)
@@ -151,17 +154,43 @@ func main() {
 					maxSlot = e.Slot
 				}
 
+				if measuredInWeek[e.ID] {
+					continue
+				}
+				measuredInWeek[e.ID] = true
+
 				text := e.Summary
 				startsToday := e.StartsOnDate(date, newYork)
 				if !e.IsAllDayEvent && startsToday {
 					text = e.StartTimeShort(newYork) + " " + text
 				}
-				if !startsToday {
+
+				// Calculate width: if multi-day, it might span multiple columns in this week
+				w := c.ColumnWidth() - 10
+				endsOnDifferentDay := !e.EndsOnDate(e.StartTime, newYork)
+				if endsOnDifferentDay {
+					// How many days from 'date' to end of week or event?
+					daysToWeekEnd := 7 - j
+					daysToEventEnd := int(e.EndTime.Sub(date).Hours()/24) + 1
+					spanDays := daysToWeekEnd
+					if daysToEventEnd < spanDays {
+						spanDays = daysToEventEnd
+					}
+					w = spanDays*c.ColumnWidth() - 10
+				} else if !startsToday {
 					text = "  " + text
 				}
 
-				w := c.ColumnWidth() - 10
-				h := canv.MeasureMultiColorString(text, w, face)
+				var h int
+				if ch, ok := canonicalHeights[e.ID]; ok {
+					h = ch
+				} else {
+					h = canv.MeasureMultiColorString(text, w, face)
+					if endsOnDifferentDay {
+						canonicalHeights[e.ID] = h
+					}
+				}
+				e.RowHeight = h
 
 				if h > slotHeights[i][e.Slot] {
 					slotHeights[i][e.Slot] = h
