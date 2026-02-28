@@ -101,12 +101,12 @@ func main() {
 			Hinting: font.HintingFull,
 		}),
 		truetype.NewFace(unifontMono, &truetype.Options{
-			Size:    18,
+			Size:    16, // Event font, native Unifont size is 16
 			DPI:     72,
 			Hinting: font.HintingFull,
 		}),
 		truetype.NewFace(unifontMono, &truetype.Options{
-			Size:    14, // Battery percentage font, smaller for smaller icon
+			Size:    16, // Battery percentage font, native Unifont size is 16
 			DPI:     72,
 			Hinting: font.HintingFull,
 		}),
@@ -134,7 +134,7 @@ func main() {
 
 	// Standard face for measurement - MUST MATCH NewCalendar eventFace (unifontMono, 16)
 	face := truetype.NewFace(unifontMono, &truetype.Options{
-		Size:    18, // MATCH NewCalendar
+		Size:    16, // MATCH NewCalendar
 		DPI:     72,
 		Hinting: font.HintingFull,
 	})
