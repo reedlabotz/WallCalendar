@@ -4,6 +4,7 @@ import (
 	"image"
 	"image/color"
 	"image/draw"
+	"math"
 	"strings"
 
 	"golang.org/x/image/font"
@@ -365,6 +366,57 @@ func (c Canvas) invertAt(x, y int) {
 		c.dst.Set(x, y, Black.ToColor())
 	} else { // Black
 		c.dst.Set(x, y, White.ToColor())
+	}
+}
+
+func (c Canvas) DrawRoundedRectangle(x, y, w, h, radius int, col Color) {
+	c.DrawPartialRoundedRectangle(x, y, w, h, radius, col, true, true)
+}
+
+func (c Canvas) DrawPartialRoundedRectangle(x, y, w, h, radius int, col Color, leftRounded, rightRounded bool) {
+	// Top and bottom lines
+	startX := x
+	endX := x + w
+	if leftRounded {
+		startX += radius
+	}
+	if rightRounded {
+		endX -= radius
+	}
+
+	for i := startX; i < endX; i++ {
+		c.dst.Set(i, y, col.ToColor())
+		c.dst.Set(i, y+h-1, col.ToColor())
+	}
+
+	// Left and right lines
+	for j := y + radius; j < y+h-radius; j++ {
+		if leftRounded {
+			c.dst.Set(x, j, col.ToColor())
+		}
+		if rightRounded {
+			c.dst.Set(x+w-1, j, col.ToColor())
+		}
+	}
+
+	// Corners
+	if leftRounded {
+		c.drawCorner(x+radius, y+radius, radius, 180, col)    // Top-left
+		c.drawCorner(x+radius, y+h-1-radius, radius, 90, col) // Bottom-left
+	}
+	if rightRounded {
+		c.drawCorner(x+w-1-radius, y+radius, radius, 270, col)   // Top-right
+		c.drawCorner(x+w-1-radius, y+h-1-radius, radius, 0, col) // Bottom-right
+	}
+}
+
+func (c Canvas) drawCorner(cx, cy, r, startAngle int, col Color) {
+	// Simple arc drawing
+	for i := 0; i <= 90; i++ {
+		angle := float64(startAngle+i) * 3.14159 / 180.0
+		px := cx + int(float64(r)*math.Cos(angle))
+		py := cy + int(float64(r)*math.Sin(angle))
+		c.dst.Set(px, py, col.ToColor())
 	}
 }
 

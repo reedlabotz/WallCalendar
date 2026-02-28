@@ -76,23 +76,31 @@ func (c Calendar) RenderDayHeaders() {
 	}
 }
 
-func (c Calendar) drawCarryoverLine(e *Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool) {
+func (c Calendar) drawCarryoverBox(e *Event, x int, y int, columnWidth int, date time.Time, column int, dropLeftMargin bool, isEnd bool) {
 	w := columnWidth
-	thickness := 4 // Thicker bars for multi-day events
-	if e.EndsOnDate(date, c.tz) {
-		w -= cellPadding
-		c.canv.DrawHorizontalArrow(x, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, canvas.Red, canvas.ArrowRight)
-	} else {
-		left := x
-		if column == 0 && dropLeftMargin {
-			left -= margin
-			w += margin
-		}
-		if column == 6 {
-			w += margin
-		}
-		c.canv.DrawThickHorizontalLine(left, y-c.eventFace.Metrics().Ascent.Ceil()/2, w, thickness, canvas.Red)
+	h := c.eventFace.Metrics().Height.Ceil() + 8        // Increased padding for the box
+	boxY := y - c.eventFace.Metrics().Ascent.Ceil() - 3 // Padding: 3px top, 5px bottom (approx)
+
+	leftRounded := e.StartsOnDate(date, c.tz) || (column == 0 && !dropLeftMargin)
+	rightRounded := isEnd
+
+	// If it's a continuation from previous row, don't round left
+	if column == 0 && !e.StartsOnDate(date, c.tz) && dropLeftMargin {
+		leftRounded = false
 	}
+
+	// Adjust width and start for margins
+	startX := x
+	if column == 0 && dropLeftMargin {
+		startX -= margin
+		w += margin
+	}
+	if column == 6 && !isEnd {
+		w += margin
+	}
+
+	// Multi-day events get a red box
+	c.canv.DrawPartialRoundedRectangle(startX, boxY, w, h, 8, canvas.Red, leftRounded, rightRounded)
 }
 
 func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isToday bool, slotHeights map[int]int, rowY int, rowHeight int, weather DailyWeather) {
@@ -151,16 +159,27 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 		}
 
 		startsToday := e.StartsOnDate(date, c.tz)
-		if !startsToday && !isFirstCalendarDay {
-			c.drawCarryoverLine(e, boxLeft, y, columnWidth, date, col, true)
+		endsOnDifferentDay := !e.EndsOnDate(e.StartTime, c.tz)
+
+		if endsOnDifferentDay {
+			isEnd := e.EndsOnDate(date, c.tz)
+			// Draw the multi-day box
+			c.drawCarryoverBox(e, boxLeft, y, columnWidth, date, col, !startsToday && !isFirstCalendarDay, isEnd)
+
+			// If it's the start, or it's the first day we see in the calendar view, draw text
+			if startsToday || isFirstCalendarDay {
+				text := e.Summary
+				if !e.IsAllDayEvent && startsToday {
+					text = e.StartTimeShort(c.tz) + " " + text
+				}
+				// Always LEFT align multi-day text inside the box.
+				// We add a bit of padding-left.
+				c.canv.DrawString(text, boxLeft+cellPadding+2, y, columnWidth-cellPadding*2-4, c.eventFace, canvas.Black, canvas.Left)
+			}
 		} else {
+			// Normal single-day event
 			timePart := ""
 			redSpan := 0
-			if !startsToday {
-				// Add spacing for continuation arrow
-				timePart += "  "
-				c.canv.DrawHorizontalArrow(boxLeft+cellPadding, y-c.eventFace.Metrics().Ascent.Ceil()/2, int(1.5*float64(font.MeasureString(c.eventFace, " ").Ceil())), canvas.Red, canvas.ArrowLeft)
-			}
 			if !e.IsAllDayEvent && startsToday {
 				timePart += e.StartTimeShort(c.tz) + " "
 			}
@@ -189,10 +208,7 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 					},
 				}
 			}
-			_, widths := c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
-			if !e.EndsOnDate(e.StartTime, c.tz) {
-				c.drawCarryoverLine(e, boxLeft+cellPadding+widths[0], y, columnWidth-cellPadding-widths[0], date, col, false)
-			}
+			c.canv.DrawMultiColorString(timePart+e.Summary, boxLeft+cellPadding, y, columnWidth-cellPadding*2, c.eventFace, cols, canvas.Left)
 		}
 	}
 }
