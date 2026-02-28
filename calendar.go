@@ -78,7 +78,7 @@ func (c Calendar) RenderDayHeaders() {
 
 func (c Calendar) drawCarryoverBox(x int, y int, w int, h int, leftRounded bool, rightRounded bool, dropLeftMargin bool, dropRightMargin bool) {
 	// Add some vertical padding to the slot height for the box
-	padding := 12
+	padding := 4
 	boxH := h + padding
 	boxY := y - c.eventFace.Metrics().Ascent.Ceil() - (padding / 2)
 
@@ -152,6 +152,10 @@ func (c Calendar) Render(col int, row int, date time.Time, events []*Event, isTo
 
 		startsToday := e.StartsOnDate(date, c.tz)
 		endsOnDifferentDay := !e.EndsOnDate(e.StartTime, c.tz)
+
+		if date.Format("2006-01-02") == "2025-10-26" && endsOnDifferentDay {
+			fmt.Printf("Oct 26: Event '%s' (Slot %d), e.RowHeight=%d, slotHeights[e.Slot]=%d, Y starts at %d\n", e.Summary, e.Slot, e.RowHeight, slotHeights[e.Slot], y)
+		}
 
 		if endsOnDifferentDay {
 			// If it's the start of the event, OR the first day of the week, draw text and box for the whole span
