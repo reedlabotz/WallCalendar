@@ -36,9 +36,9 @@ An e-ink wall calendar display built for Raspberry Pi. It displays Google Calend
 
 ## Build & Run
 
-### Build for Raspberry Pi
+### Build for Raspberry Pi (Zero / Zero W)
 ```bash
-env GOOS=linux GOARCH=arm GOARM=6 go build -o wallcalendar *.go
+env GOOS=linux GOARCH=arm GOARM=6 go build -o wallcalendar .
 ```
 
 ### Local Render (Preview)
@@ -50,4 +50,17 @@ To see a PNG representation of the display without having the screen connected:
 ### Options
 - `--date_override 2024-11-21`: View the calendar as it would appear on a specific date.
 - `--clear_screen`: Perform a full refresh/clear of the e-ink screen.
-- `--battery "battery: 80"`: Simulate a battery level (useful for automation or testing).
+- `--battery "80"`: Optional manual battery percentage override (automatically queries PiSugar if omitted).
+- `--shutdown`: Enable automatic poweroff upon completion of scheduled RTC wakeups.
+- `--network_timeout 60s`: Timeout waiting for network connectivity (default: 60s).
+- `--pisugar_addr 127.0.0.1:8423`: PiSugar TCP server address.
+
+### Systemd Service (Battery / RTC Wake Setup)
+To run automatically on boot when woken by the PiSugar RTC alarm:
+1. Copy `wall-calendar.service` to `/etc/systemd/system/wall-calendar.service`.
+2. Enable the service:
+   ```bash
+   sudo systemctl daemon-reload
+   sudo systemctl enable wall-calendar.service
+   ```
+The service starts immediately upon local filesystem mount. The Go binary polls the network concurrently with display hardware initialization and safely evaluates whether to power down.

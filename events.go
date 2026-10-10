@@ -96,29 +96,29 @@ func (e Event) StartTimeShort(tz *time.Location) string {
 	return e.StartTime.In(tz).Format(fmt)
 }
 
-func FetchEvents(today time.Time, calendarId string, tz *time.Location, numWeeks int, tokenJSON string) (map[time.Time][]*Event, time.Time, time.Time) {
+func FetchEvents(today time.Time, calendarId string, tz *time.Location, numWeeks int, tokenJSON string) (map[time.Time][]*Event, time.Time, time.Time, error) {
 	ctx := context.Background()
 	b, err := os.ReadFile("credentials.json")
 	if err != nil {
-		log.Fatalf("Unable to read client secret file: %v", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("unable to read client secret file: %w", err)
 	}
 
 	// If modifying these scopes, delete your previously saved token.json.
 	config, err := google.ConfigFromJSON(b, calendar.CalendarReadonlyScope)
 	if err != nil {
-		log.Fatalf("Unable to parse client secret file to config: %v", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("unable to parse client secret file to config: %w", err)
 	}
 	config.RedirectURL = "http://localhost:8080"
 
 	tok := &oauth2.Token{}
 	if err := json.Unmarshal([]byte(tokenJSON), tok); err != nil {
-		log.Fatalf("Unable to parse token from config: %v", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("unable to parse token from config: %w", err)
 	}
 	client := config.Client(ctx, tok)
 
 	srv, err := calendar.NewService(ctx, option.WithHTTPClient(client))
 	if err != nil {
-		log.Fatalf("Unable to retrieve Calendar client: %v", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("unable to retrieve Calendar client: %w", err)
 	}
 
 	start := startOfDayOfWeek(today, tz)
@@ -131,7 +131,7 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location, numWeeks
 	events, err := srv.Events.List(calendarId).ShowDeleted(false).
 		SingleEvents(true).TimeMin(start.Format(time.RFC3339)).TimeMax(end.Format(time.RFC3339)).OrderBy("startTime").Do()
 	if err != nil {
-		log.Fatalf("Unable to retrieve next ten of the user's events: %v", err)
+		return nil, time.Time{}, time.Time{}, fmt.Errorf("unable to retrieve events from Calendar API: %w", err)
 	}
 
 	if len(events.Items) != 0 {
@@ -224,7 +224,7 @@ func FetchEvents(today time.Time, calendarId string, tz *time.Location, numWeeks
 		}
 	}
 
-	return dateMap, start, lastday
+	return dateMap, start, lastday, nil
 }
 
 func startOfDayOfWeek(date time.Time, location *time.Location) time.Time {
