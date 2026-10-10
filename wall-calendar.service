@@ -1,0 +1,14 @@
+[Unit]
+Description=Wall Calendar Battery Runner
+After=local-fs.target
+
+[Service]
+Type=oneshot
+User=reedlabotz
+WorkingDirectory=/home/reedlabotz/WallCalendar
+ExecStart=/home/reedlabotz/WallCalendar/wallcalendar --shutdown
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

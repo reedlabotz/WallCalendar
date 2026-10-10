@@ -1,16 +1,20 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"image"
 	"image/png"
+	"log"
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"wallcalendar/canvas"
+	"wallcalendar/lifecycle"
 	"wallcalendar/waveshare"
 
 	"github.com/furconz/freetype/truetype"
@@ -39,12 +43,23 @@ func loadFontFile(path string) *truetype.Font {
 	return loadFont(b)
 }
 
+func parseBatteryOverride(raw string) (float64, error) {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("empty battery override")
+	}
+	return strconv.ParseFloat(parts[len(parts)-1], 64)
+}
+
 func main() {
 	onlyRenderImage := flag.Bool("only_render_image", false, "Only render the image, no screen")
 	clearScreen := flag.Bool("clear_screen", false, "Clear the screen")
 	dateOverride := flag.String("date_override", "", "Date to use as today, e.g. 2024-11-21")
-	battery := flag.String("battery", "battery: 80", "Battery output from pisugar")
+	battery := flag.String("battery", "", "Battery override from pisugar, e.g. '80' or 'battery: 80'")
 	bootstrap := flag.Bool("bootstrap", false, "Run Google OAuth bootstrap flow")
+	shutdown := flag.Bool("shutdown", false, "Enable automatic shutdown when scheduled wake finishes")
+	piSugarAddr := flag.String("pisugar_addr", "127.0.0.1:8423", "PiSugar TCP server address")
+	networkTimeout := flag.Duration("network_timeout", 12*time.Second, "Timeout waiting for network connection")
 	flag.Parse()
 
 	if *bootstrap {
@@ -58,8 +73,6 @@ func main() {
 		return
 	}
 
-	img := waveshare.NewHorizontalLSB(image.Rect(0, 0, 1304, 984))
-
 	newYork, err := time.LoadLocation(cfg.Location.Timezone)
 	if err != nil {
 		fmt.Printf("Error loading timezone: %v\n", err)
@@ -67,7 +80,6 @@ func main() {
 	}
 
 	today := midnight(time.Now().In(newYork), newYork)
-
 	if len(*dateOverride) > 0 {
 		var err error
 		today, err = time.ParseInLocation("2006-01-02", *dateOverride, newYork)
@@ -78,15 +90,151 @@ func main() {
 		today = midnight(today, newYork)
 	}
 
-	dateMap, start, lastday := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks, cfg.Google.Token)
+	var wg sync.WaitGroup
+	var displayInitialized bool
+	var goMono, unifontMono *truetype.Font
 
-	weatherMap, err := FetchWeather(cfg.Location.Latitude, cfg.Location.Longitude, cfg.Location.Timezone, cfg.Weather.TempUnit)
-	if err != nil {
-		fmt.Println("Error fetching weather:", err)
+	// Task 1: Hardware & Font Setup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		if !*onlyRenderImage {
+			waveshare.Initialize()
+			displayInitialized = true
+		}
+		goMono = loadFont(gomono.TTF)
+		unifontMono = loadFontFile("fonts/UnifontExMono.ttf")
+	}()
+
+	// Task 2: PiSugar status & Network probe + remote data fetching
+	var batteryPercent float64
+	var isRTCWake bool
+	var dateMap map[time.Time][]*Event
+	var start, lastday time.Time
+	var weatherMap map[string]DailyWeather
+	var networkErr error
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+
+		// Query PiSugar
+		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 500*time.Millisecond)
+		if *battery != "" {
+			if b, err := parseBatteryOverride(*battery); err == nil {
+				batteryPercent = b
+			} else {
+				log.Printf("Failed to parse --battery override %q: %v", *battery, err)
+			}
+		} else {
+			if b, err := sugarClient.GetBattery(); err == nil {
+				batteryPercent = b
+			} else {
+				log.Printf("PiSugar battery query failed: %v", err)
+			}
+		}
+
+		if isWake, err := sugarClient.IsRTCWake(); err == nil {
+			isRTCWake = isWake
+		} else {
+			log.Printf("PiSugar RTC alarm flag query failed: %v", err)
+		}
+
+		_ = sugarClient.SyncRTCWeb()
+
+		// Probe network with sub-second polling and fast timeout
+		ctx, cancel := context.WithTimeout(context.Background(), *networkTimeout)
+		defer cancel()
+
+		if err := lifecycle.WaitForNetwork(ctx, "1.1.1.1:53", 250*time.Millisecond); err != nil {
+			log.Printf("Network unreachable within %v: %v; skipping render.", *networkTimeout, err)
+			networkErr = err
+			return
+		}
+
+		// Fetch calendar events
+		dMap, s, l, err := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks, cfg.Google.Token)
+		if err != nil {
+			log.Printf("Error fetching calendar events: %v; skipping render.", err)
+			networkErr = err
+			return
+		}
+		dateMap = dMap
+		start = s
+		lastday = l
+
+		// Fetch weather (non-fatal)
+		wMap, err := FetchWeather(cfg.Location.Latitude, cfg.Location.Longitude, cfg.Location.Timezone, cfg.Weather.TempUnit)
+		if err != nil {
+			log.Printf("Error fetching weather: %v", err)
+		}
+		weatherMap = wMap
+	}()
+
+	wg.Wait()
+
+	// If network timed out or data fetching failed: skip rendering, ensure display sleep, evaluate shutdown
+	if networkErr != nil {
+		log.Printf("Data fetch failed (%v). Skipping render to conserve battery.", networkErr)
+		if displayInitialized {
+			waveshare.Sleep()
+			waveshare.Close()
+		}
+		handleShutdownEvaluation(*shutdown, isRTCWake)
+		return
 	}
-	goMono := loadFont(gomono.TTF)
-	unifontMono := loadFontFile("fonts/UnifontExMono.ttf")
 
+	// Network succeeded: render calendar image
+	img := waveshare.NewHorizontalLSB(image.Rect(0, 0, 1304, 984))
+	renderCalendar(img, cfg, today, start, lastday, dateMap, weatherMap, goMono, unifontMono, batteryPercent, newYork)
+
+	if *onlyRenderImage {
+		f, err := os.Create("processed.png")
+		if err == nil {
+			_ = png.Encode(f, img)
+			_ = f.Close()
+			log.Println("Successfully saved rendered image to processed.png")
+		} else {
+			log.Printf("Error creating processed.png: %v", err)
+		}
+	} else if displayInitialized {
+		if *clearScreen {
+			waveshare.Clear()
+			time.Sleep(300 * time.Millisecond)
+		}
+		waveshare.Display(img)
+		waveshare.Sleep()
+		waveshare.Close()
+	}
+
+	if err := PublishToHomeAssistant(batteryPercent, *cfg); err != nil {
+		log.Printf("Error publishing to Home Assistant: %v", err)
+	}
+
+	handleShutdownEvaluation(*shutdown, isRTCWake)
+}
+
+func handleShutdownEvaluation(enableShutdown bool, isRTCWake bool) {
+	shouldPoweroff, reason, err := lifecycle.EvaluateShutdown(lifecycle.ShutdownOptions{
+		EnableShutdown: enableShutdown,
+		IsRTCWake:      isRTCWake,
+	})
+	if err != nil {
+		log.Printf("Error during shutdown evaluation: %v", err)
+	}
+	log.Printf("Shutdown evaluation result: %s (will poweroff: %t)", reason, shouldPoweroff)
+}
+
+func renderCalendar(
+	img *waveshare.HorizontalLSB,
+	cfg *Config,
+	today, start, lastday time.Time,
+	dateMap map[time.Time][]*Event,
+	weatherMap map[string]DailyWeather,
+	goMono, unifontMono *truetype.Font,
+	batteryPercent float64,
+	newYork *time.Location,
+) {
 	canv := canvas.NewCanvas(img)
 	c := NewCalendar(
 		canv,
@@ -169,7 +317,6 @@ func main() {
 				w := c.ColumnWidth() - 10
 				endsOnDifferentDay := !e.EndsOnDate(e.StartTime, newYork)
 				if endsOnDifferentDay {
-					// How many days from 'date' to end of week or event?
 					daysToWeekEnd := 7 - j
 					daysToEventEnd := int(e.EndTime.Sub(date).Hours()/24) + 1
 					spanDays := daysToWeekEnd
@@ -198,8 +345,6 @@ func main() {
 			}
 		}
 
-		// Calculate total height for this week
-		// Header offset (85) + padding
 		weekHeight := 85
 		eventPadding := int(float64(face.Metrics().Height.Round()) * 0.5)
 
@@ -210,43 +355,31 @@ func main() {
 				weekHeight += face.Metrics().Height.Ceil() + eventPadding
 			}
 		}
-		// Add a bit of bottom padding
 		weekHeight += 10
 
 		requiredHeights[i] = weekHeight
 		totalRequiredHeight += weekHeight
 	}
 
-	// fmt.Printf("Required Heights: %v\n", requiredHeights)
-	// fmt.Printf("Total Required: %d\n", totalRequiredHeight)
-
-	// Distribute available height
-	// Total available height = 1304 - headerHeight (140) - margin (8) = 836
 	availableHeight := 984 - 140 - 8
 	finalHeights := make([]int, cfg.Calendar.NumWeeks)
 
-	// If we have enough space, give everyone what they need + extra
 	if totalRequiredHeight <= availableHeight {
 		extra := availableHeight - totalRequiredHeight
 		for i := 0; i < cfg.Calendar.NumWeeks; i++ {
 			finalHeights[i] = requiredHeights[i] + extra/cfg.Calendar.NumWeeks
 		}
 	} else {
-		// Not enough space, distribute proportionally
 		currentY := 0
 		for i := 0; i < cfg.Calendar.NumWeeks; i++ {
-			// Use float math for better precision then round
 			h := int(float64(requiredHeights[i]) / float64(totalRequiredHeight) * float64(availableHeight))
 			finalHeights[i] = h
-			// Adjust last one to fill exactly
 			if i == cfg.Calendar.NumWeeks-1 {
 				finalHeights[i] = availableHeight - currentY
 			}
 			currentY += h
 		}
 	}
-
-	// fmt.Printf("Final Heights: %v\n", finalHeights)
 
 	currentY := 140 + 8 // headerHeight + margin
 	for i := 0; i < cfg.Calendar.NumWeeks; i++ {
@@ -255,48 +388,14 @@ func main() {
 			dateKey := date.Format("2006-01-02")
 			weather, ok := weatherMap[dateKey]
 			if !ok || i >= 2 {
-				// if i < 2 {
-				// 	fmt.Printf("No weather for %s\n", dateKey)
-				// }
 				weather = DailyWeather{}
-			} else {
-				// fmt.Printf("Found weather for %s: %.0f/%.0f\n", dateKey, weather.TempMax, weather.TempMin)
 			}
 			c.Render(j, i, date, dateMap[date], date == today, slotHeights[i], currentY, finalHeights[i], weather)
 		}
 		currentY += finalHeights[i]
 	}
 
-	batteryParts := strings.Split(*battery, " ")
-	if len(batteryParts) != 2 {
-		panic("Battery is wrong" + *battery)
-	}
-	num, err := strconv.ParseFloat(batteryParts[1], 64)
-	if err != nil {
-		panic(err)
-	}
-
-	c.RenderBatteryAndTime(num)
-
-	if *onlyRenderImage {
-		f, _ := os.Create("processed.png")
-		png.Encode(f, img)
-	} else {
-		waveshare.Initialize()
-		defer waveshare.Close()
-
-		if *clearScreen {
-			waveshare.Clear()
-			time.Sleep(300 * time.Millisecond)
-		}
-
-		waveshare.Display(img)
-		waveshare.Sleep()
-	}
-
-	if err := PublishToHomeAssistant(num, *cfg); err != nil {
-		fmt.Printf("Error publishing to Home Assistant: %v\n", err)
-	}
+	c.RenderBatteryAndTime(batteryPercent)
 }
 
 func runBootstrap() {
