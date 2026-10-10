@@ -1,6 +1,7 @@
 [Unit]
 Description=Wall Calendar Battery Runner
-After=local-fs.target
+After=local-fs.target pisugar-server.service
+Wants=pisugar-server.service
 
 [Service]
 Type=oneshot

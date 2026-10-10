@@ -80,17 +80,6 @@ func main() {
 		return
 	}
 
-	today := midnight(time.Now().In(newYork), newYork)
-	if len(*dateOverride) > 0 {
-		var err error
-		today, err = time.ParseInLocation("2006-01-02", *dateOverride, newYork)
-		if err != nil {
-			fmt.Println("Error parsing date:", err)
-			return
-		}
-		today = midnight(today, newYork)
-	}
-
 	var wg sync.WaitGroup
 	var goMono, unifontMono *truetype.Font
 
@@ -103,6 +92,7 @@ func main() {
 	}()
 
 	// Task 2: PiSugar status & Network probe + remote data fetching
+	var today time.Time
 	var batteryPercent float64
 	var isRTCWake bool
 	var dateMap map[time.Time][]*Event
@@ -136,7 +126,10 @@ func main() {
 			log.Printf("PiSugar RTC alarm flag query failed: %v", err)
 		}
 
-		_ = sugarClient.SyncRTCWeb()
+		// Sync hardware RTC from PiSugar into the Linux system clock immediately
+		if err := sugarClient.SyncRTCToPi(); err != nil {
+			log.Printf("PiSugar RTC to Pi sync failed: %v", err)
+		}
 
 		// Probe network with sub-second polling and fast timeout
 		ctx, cancel := context.WithTimeout(context.Background(), *networkTimeout)
@@ -147,6 +140,21 @@ func main() {
 			networkErr = err
 			return
 		}
+
+		// Compute calendar date now that hardware RTC and network are available
+		if len(*dateOverride) > 0 {
+			var err error
+			today, err = time.ParseInLocation("2006-01-02", *dateOverride, newYork)
+			if err != nil {
+				log.Printf("Error parsing date override: %v", err)
+				networkErr = err
+				return
+			}
+			today = midnight(today, newYork)
+		} else {
+			today = midnight(time.Now().In(newYork), newYork)
+		}
+		log.Printf("Calendar active date: %s (%s)", today.Format("2006-01-02"), today.Weekday())
 
 		// Fetch calendar events
 		dMap, s, l, err := FetchEvents(today, cfg.Calendar.ID, newYork, cfg.Calendar.NumWeeks, cfg.Google.Token)
