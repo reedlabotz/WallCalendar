@@ -4,9 +4,9 @@ After=local-fs.target
 
 [Service]
 Type=oneshot
-User=reedlabotz
-WorkingDirectory=/home/reedlabotz/WallCalendar
-ExecStart=/home/reedlabotz/WallCalendar/wallcalendar --shutdown
+User=root
+WorkingDirectory=/home/reedlabotz
+ExecStart=/home/reedlabotz/wallcalendar --shutdown
 StandardOutput=journal
 StandardError=journal
 
