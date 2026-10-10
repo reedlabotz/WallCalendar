@@ -17,6 +17,7 @@ type HAEntityConfig struct {
 	UniqueID          string   `json:"unique_id"`
 	Device            HADevice `json:"device"`
 	DeviceClass       string   `json:"device_class,omitempty"`
+	StateClass        string   `json:"state_class,omitempty"`
 }
 
 type HADevice struct {
@@ -25,6 +26,30 @@ type HADevice struct {
 	Model        string      `json:"model"`
 	Manufacturer string      `json:"manufacturer"`
 	Connections  [][2]string `json:"connections"`
+}
+
+func newBatterySensorConfig(device HADevice) HAEntityConfig {
+	return HAEntityConfig{
+		Name:              "Wall Calendar Battery",
+		StateTopic:        "wall_calendar/state",
+		UnitOfMeasurement: "%",
+		ValueTemplate:     "{{ value_json.battery }}",
+		UniqueID:          "wall_calendar_battery",
+		Device:            device,
+		DeviceClass:       "battery",
+		StateClass:        "measurement",
+	}
+}
+
+func newLastUpdateSensorConfig(device HADevice) HAEntityConfig {
+	return HAEntityConfig{
+		Name:          "Wall Calendar Last Update",
+		StateTopic:    "wall_calendar/state",
+		ValueTemplate: "{{ value_json.last_update }}",
+		UniqueID:      "wall_calendar_last_update",
+		Device:        device,
+		DeviceClass:   "timestamp",
+	}
 }
 
 func getMACAddress() string {
@@ -75,27 +100,12 @@ func PublishToHomeAssistant(battery float64, cfg Config) error {
 
 	// Battery Sensor
 	batteryDiscoveryTopic := "homeassistant/sensor/wall_calendar/battery/config"
-	batteryConfig := HAEntityConfig{
-		Name:              "Wall Calendar Battery",
-		StateTopic:        "wall_calendar/state",
-		UnitOfMeasurement: "%",
-		ValueTemplate:     "{{ value_json.battery }}",
-		UniqueID:          "wall_calendar_battery",
-		Device:            device,
-		DeviceClass:       "battery",
-	}
+	batteryConfig := newBatterySensorConfig(device)
 	publishJSON(client, batteryDiscoveryTopic, batteryConfig)
 
 	// Last Update Sensor
 	updateDiscoveryTopic := "homeassistant/sensor/wall_calendar/last_update/config"
-	updateConfig := HAEntityConfig{
-		Name:          "Wall Calendar Last Update",
-		StateTopic:    "wall_calendar/state",
-		ValueTemplate: "{{ value_json.last_update }}",
-		UniqueID:      "wall_calendar_last_update",
-		Device:        device,
-		DeviceClass:   "timestamp",
-	}
+	updateConfig := newLastUpdateSensorConfig(device)
 	publishJSON(client, updateDiscoveryTopic, updateConfig)
 
 	// Publish State
