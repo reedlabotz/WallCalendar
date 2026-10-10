@@ -61,7 +61,7 @@ func (c *PiSugarClient) GetBattery() (float64, error) {
 		return 0, err
 	}
 
-	parts := strings.Split(resp, " ")
+	parts := strings.Fields(resp)
 	if len(parts) < 2 {
 		return 0, fmt.Errorf("unexpected battery response format: %q", resp)
 	}
