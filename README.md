@@ -50,7 +50,7 @@ To see a PNG representation of the display without having the screen connected:
 ### Options
 - `--date_override 2024-11-21`: View the calendar as it would appear on a specific date.
 - `--clear_screen`: Force a full clear/blank of the e-ink screen.
-- `--clear_morning`: Automatically clear the screen on morning runs before 9 AM (default: true).
+- `--clear_weekly`: Automatically clear the screen once a week on Sundays (default: true).
 - `--battery "80"`: Optional manual battery percentage override (automatically queries PiSugar if omitted).
 - `--shutdown`: Enable automatic poweroff upon completion of scheduled RTC wakeups.
 - `--network_timeout 60s`: Timeout waiting for network connectivity (default: 60s).

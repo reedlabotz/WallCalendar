@@ -54,7 +54,7 @@ func parseBatteryOverride(raw string) (float64, error) {
 func main() {
 	onlyRenderImage := flag.Bool("only_render_image", false, "Only render the image, no screen")
 	clearScreen := flag.Bool("clear_screen", false, "Force clear the screen")
-	clearMorning := flag.Bool("clear_morning", true, "Automatically clear the screen on morning runs (before 9 AM)")
+	clearWeekly := flag.Bool("clear_weekly", true, "Automatically clear the screen once a week on Sundays")
 	dateOverride := flag.String("date_override", "", "Date to use as today, e.g. 2024-11-21")
 	battery := flag.String("battery", "", "Battery override from pisugar, e.g. '80' or 'battery: 80'")
 	bootstrap := flag.Bool("bootstrap", false, "Run Google OAuth bootstrap flow")
@@ -193,13 +193,13 @@ func main() {
 		waveshare.Initialize()
 		defer waveshare.Close()
 
-		shouldClear := *clearScreen || (*clearMorning && time.Now().In(newYork).Hour() < 9)
+		shouldClear := *clearScreen || (*clearWeekly && today.Weekday() == time.Sunday)
 		if shouldClear {
-			log.Println("Running full clear screen...")
+			log.Println("Running full clear screen (weekly Sunday reset)...")
 			waveshare.Clear()
 			time.Sleep(300 * time.Millisecond)
 		} else {
-			log.Println("Skipping clear screen (daytime run)")
+			log.Println("Skipping clear screen (fast daily update)")
 		}
 		waveshare.Display(img)
 		waveshare.Sleep()
