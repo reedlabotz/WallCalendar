@@ -59,7 +59,7 @@ func main() {
 	bootstrap := flag.Bool("bootstrap", false, "Run Google OAuth bootstrap flow")
 	shutdown := flag.Bool("shutdown", false, "Enable automatic shutdown when scheduled wake finishes")
 	piSugarAddr := flag.String("pisugar_addr", "127.0.0.1:8423", "PiSugar TCP server address")
-	networkTimeout := flag.Duration("network_timeout", 12*time.Second, "Timeout waiting for network connection")
+	networkTimeout := flag.Duration("network_timeout", 60*time.Second, "Timeout waiting for network connection")
 	flag.Parse()
 
 	if *bootstrap {
