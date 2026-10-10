@@ -91,17 +91,12 @@ func main() {
 	}
 
 	var wg sync.WaitGroup
-	var displayInitialized bool
 	var goMono, unifontMono *truetype.Font
 
-	// Task 1: Hardware & Font Setup
+	// Task 1: Font Setup (local I/O and TTF parsing)
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if !*onlyRenderImage {
-			waveshare.Initialize()
-			displayInitialized = true
-		}
 		goMono = loadFont(gomono.TTF)
 		unifontMono = loadFontFile("fonts/UnifontExMono.ttf")
 	}()
@@ -173,13 +168,9 @@ func main() {
 
 	wg.Wait()
 
-	// If network timed out or data fetching failed: skip rendering, ensure display sleep, evaluate shutdown
+	// If network timed out or data fetching failed: skip rendering and evaluate shutdown
 	if networkErr != nil {
 		log.Printf("Data fetch failed (%v). Skipping render to conserve battery.", networkErr)
-		if displayInitialized {
-			waveshare.Sleep()
-			waveshare.Close()
-		}
 		handleShutdownEvaluation(*shutdown, isRTCWake)
 		return
 	}
@@ -197,14 +188,16 @@ func main() {
 		} else {
 			log.Printf("Error creating processed.png: %v", err)
 		}
-	} else if displayInitialized {
+	} else {
+		waveshare.Initialize()
+		defer waveshare.Close()
+
 		if *clearScreen {
 			waveshare.Clear()
 			time.Sleep(300 * time.Millisecond)
 		}
 		waveshare.Display(img)
 		waveshare.Sleep()
-		waveshare.Close()
 	}
 
 	if err := PublishToHomeAssistant(batteryPercent, *cfg); err != nil {
