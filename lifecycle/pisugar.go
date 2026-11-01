@@ -122,11 +122,10 @@ func parseRFC3339Value(prefix, resp string) (time.Time, error) {
 	return t, nil
 }
 
-// IsWithinAlarmWindow determines if the rtcTime is within [-5m, +45m] of the alarmTime's time of day.
-func IsWithinAlarmWindow(rtcTime, alarmTime time.Time) bool {
-	rtcSecs := rtcTime.Hour()*3600 + rtcTime.Minute()*60 + rtcTime.Second()
-	alarmSecs := alarmTime.Hour()*3600 + alarmTime.Minute()*60 + alarmTime.Second()
-	diff := rtcSecs - alarmSecs
+func isWithinWindow(t1, t2 time.Time) bool {
+	s1 := t1.Hour()*3600 + t1.Minute()*60 + t1.Second()
+	s2 := t2.Hour()*3600 + t2.Minute()*60 + t2.Second()
+	diff := s1 - s2
 	if diff < -43200 {
 		diff += 86400
 	} else if diff > 43200 {
@@ -134,6 +133,13 @@ func IsWithinAlarmWindow(rtcTime, alarmTime time.Time) bool {
 	}
 	// Allow 5 minutes before scheduled alarm (early wake/jitter) up to 45 minutes after alarm (boot duration)
 	return diff >= -300 && diff <= 2700
+}
+
+// IsWithinAlarmWindow determines if the rtcTime is within [-5m, +45m] of the alarmTime's time of day.
+// It evaluates both normalized UTC (to handle daylight saving time offset differences like EDT vs EST)
+// and local parsed time-of-day (to handle local clock schedules).
+func IsWithinAlarmWindow(rtcTime, alarmTime time.Time) bool {
+	return isWithinWindow(rtcTime.UTC(), alarmTime.UTC()) || isWithinWindow(rtcTime, alarmTime)
 }
 
 // IsRTCWake queries PiSugar to determine if the current boot was triggered by an RTC alarm.

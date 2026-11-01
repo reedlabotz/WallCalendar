@@ -171,6 +171,33 @@ func TestPiSugarClient_IsRTCWake_PiSugar3_OutsideWindow(t *testing.T) {
 	}
 }
 
+func TestPiSugarClient_IsRTCWake_PiSugar3_DSTFallback(t *testing.T) {
+	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {
+		switch cmd {
+		case "get rtc_alarm_flag":
+			return "rtc_alarm_flag: false"
+		case "get rtc_alarm_enabled":
+			return "rtc_alarm_enabled: true"
+		case "get rtc_time":
+			return "rtc_time: 2026-11-01T05:00:25.000-05:00"
+		case "get rtc_alarm_time":
+			return "rtc_alarm_time: 2000-01-01T06:00:00.000-04:00"
+		default:
+			return "unknown"
+		}
+	})
+	defer cleanup()
+
+	client := NewPiSugarClient(addr, 500*time.Millisecond)
+	isWake, err := client.IsRTCWake()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !isWake {
+		t.Fatalf("expected true for DST fallback boot matching alarm in UTC, got false")
+	}
+}
+
 func TestPiSugarClient_IsRTCWake_AlarmDisabled(t *testing.T) {
 	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {
 		switch cmd {
@@ -232,11 +259,26 @@ func TestIsWithinAlarmWindow(t *testing.T) {
 			rtc:  time.Date(2026, 10, 10, 14, 0, 0, 0, time.UTC),
 			want: false,
 		},
+		{
+			name: "DST fall-back: alarm in EDT (-04:00), wake at 5am EST (-05:00) matching UTC",
+			rtc:  time.Date(2026, 11, 1, 5, 0, 25, 0, time.FixedZone("EST", -5*3600)),
+			want: true,
+		},
+		{
+			name: "DST post-transition: alarm in EDT (-04:00), wake at 6am EST (-05:00) matching local hour",
+			rtc:  time.Date(2026, 11, 2, 6, 0, 25, 0, time.FixedZone("EST", -5*3600)),
+			want: true,
+		},
 	}
 
+	edtAlarm := time.Date(2000, 1, 1, 6, 0, 0, 0, time.FixedZone("EDT", -4*3600))
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsWithinAlarmWindow(tt.rtc, alarm)
+			targetAlarm := alarm
+			if strings.Contains(tt.name, "DST") {
+				targetAlarm = edtAlarm
+			}
+			got := IsWithinAlarmWindow(tt.rtc, targetAlarm)
 			if got != tt.want {
 				t.Errorf("IsWithinAlarmWindow() = %v, want %v", got, tt.want)
 			}
