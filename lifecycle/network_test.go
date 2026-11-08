@@ -25,12 +25,18 @@ func TestWaitForNetwork_Success(t *testing.T) {
 }
 
 func TestWaitForNetwork_Timeout(t *testing.T) {
-	// Pick an address that is unreachable
+	// Pick an address that will refuse connections immediately (closed local port)
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("failed to listen: %v", err)
+	}
+	addr := l.Addr().String()
+	l.Close()
+
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 
-	// 192.0.2.1 is TEST-NET-1 (RFC 5737), non-routable blackhole
-	err := WaitForNetwork(ctx, "192.0.2.1:53", 20*time.Millisecond)
+	err = WaitForNetwork(ctx, addr, 20*time.Millisecond)
 	if err == nil {
 		t.Fatalf("expected timeout error, got nil")
 	}

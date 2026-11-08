@@ -68,6 +68,68 @@ func TestPiSugarClient_GetBattery(t *testing.T) {
 	}
 }
 
+func TestPiSugarClient_GetBattery_PercentSuffix(t *testing.T) {
+	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {
+		if cmd == "get battery" {
+			return "battery: 79%"
+		}
+		return "unknown"
+	})
+	defer cleanup()
+
+	client := NewPiSugarClient(addr, 500*time.Millisecond)
+	bat, err := client.GetBattery()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bat != 79.0 {
+		t.Fatalf("expected 79.0, got %f", bat)
+	}
+}
+
+func TestPiSugarClient_GetBatteryWithRetry_ZeroThenValid(t *testing.T) {
+	calls := 0
+	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {
+		if cmd == "get battery" {
+			calls++
+			if calls < 3 {
+				return "battery: 0"
+			}
+			return "battery: 72.5"
+		}
+		return "unknown"
+	})
+	defer cleanup()
+
+	client := NewPiSugarClient(addr, 500*time.Millisecond)
+	bat, err := client.GetBatteryWithRetry(2 * time.Second)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if bat != 72.5 {
+		t.Fatalf("expected 72.5, got %f", bat)
+	}
+	if calls < 3 {
+		t.Fatalf("expected at least 3 attempts, got %d", calls)
+	}
+}
+
+func TestPiSugarClient_GetBatteryWithRetry_Timeout(t *testing.T) {
+	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {
+		if cmd == "get battery" {
+			return "battery: 0"
+		}
+		return "unknown"
+	})
+	defer cleanup()
+
+	client := NewPiSugarClient(addr, 200*time.Millisecond)
+	_, err := client.GetBatteryWithRetry(400 * time.Millisecond)
+	if err == nil {
+		t.Fatalf("expected error on timeout with 0 battery, got nil")
+	}
+}
+
 func TestPiSugarClient_SyncRTCToPi(t *testing.T) {
 	synced := false
 	addr, cleanup := startMockPiSugarServer(t, func(cmd string) string {

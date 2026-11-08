@@ -21,7 +21,7 @@ func NewPiSugarClient(addr string, timeout time.Duration) *PiSugarClient {
 		addr = "127.0.0.1:8423"
 	}
 	if timeout <= 0 {
-		timeout = 500 * time.Millisecond
+		timeout = 1500 * time.Millisecond
 	}
 	return &PiSugarClient{
 		addr:    addr,
@@ -30,7 +30,11 @@ func NewPiSugarClient(addr string, timeout time.Duration) *PiSugarClient {
 }
 
 func (c *PiSugarClient) send(cmd string) (string, error) {
-	conn, err := net.DialTimeout("tcp", c.addr, c.timeout)
+	proto := "tcp"
+	if strings.HasPrefix(c.addr, "/") || strings.HasSuffix(c.addr, ".sock") {
+		proto = "unix"
+	}
+	conn, err := net.DialTimeout(proto, c.addr, c.timeout)
 	if err != nil {
 		return "", err
 	}
@@ -66,11 +70,46 @@ func (c *PiSugarClient) GetBattery() (float64, error) {
 		return 0, fmt.Errorf("unexpected battery response format: %q", resp)
 	}
 
-	val, err := strconv.ParseFloat(parts[len(parts)-1], 64)
+	raw := strings.TrimSuffix(strings.TrimSpace(parts[len(parts)-1]), "%")
+	val, err := strconv.ParseFloat(raw, 64)
 	if err != nil {
 		return 0, fmt.Errorf("failed to parse battery value from %q: %w", resp, err)
 	}
 	return val, nil
+}
+
+// GetBatteryWithRetry repeatedly queries PiSugar for the battery percentage with retry and backoff.
+// On cold boot, pisugar-server or its I2C communication with the battery hardware
+// can take several seconds to initialize. This function retries until a valid percentage (> 0)
+// is received or maxWait is exceeded.
+func (c *PiSugarClient) GetBatteryWithRetry(maxWait time.Duration) (float64, error) {
+	if maxWait <= 0 {
+		maxWait = 5 * time.Second
+	}
+	deadline := time.Now().Add(maxWait)
+	var lastErr error
+
+	for {
+		val, err := c.GetBattery()
+		if err == nil && val > 0 {
+			return val, nil
+		}
+		if err != nil {
+			lastErr = err
+		} else if val <= 0 {
+			lastErr = fmt.Errorf("battery reading %.1f is <= 0 (battery IC initializing)", val)
+		}
+
+		if time.Now().After(deadline) {
+			break
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+
+	if lastErr != nil {
+		return 0, lastErr
+	}
+	return 0, fmt.Errorf("timed out waiting for valid battery percentage after %v", maxWait)
 }
 
 // SyncRTCToPi instructs PiSugar to sync its hardware RTC clock into the Linux system clock.

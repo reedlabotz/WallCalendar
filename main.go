@@ -43,14 +43,6 @@ func loadFontFile(path string) *truetype.Font {
 	return loadFont(b)
 }
 
-func parseBatteryOverride(raw string) (float64, error) {
-	parts := strings.Fields(strings.TrimSpace(raw))
-	if len(parts) == 0 {
-		return 0, fmt.Errorf("empty battery override")
-	}
-	return strconv.ParseFloat(parts[len(parts)-1], 64)
-}
-
 func main() {
 	onlyRenderImage := flag.Bool("only_render_image", false, "Only render the image, no screen")
 	clearScreen := flag.Bool("clear_screen", false, "Force clear the screen")
@@ -105,16 +97,19 @@ func main() {
 		defer wg.Done()
 
 		// Query PiSugar
-		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 500*time.Millisecond)
+		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 1500*time.Millisecond)
 		if *battery != "" {
 			if b, err := parseBatteryOverride(*battery); err == nil {
 				batteryPercent = b
+				log.Printf("Using battery override: %.1f%%", batteryPercent)
 			} else {
 				log.Printf("Failed to parse --battery override %q: %v", *battery, err)
 			}
 		} else {
-			if b, err := sugarClient.GetBattery(); err == nil {
+			// Allow up to 6 seconds for pisugar-server to initialize and provide a positive reading on boot
+			if b, err := sugarClient.GetBatteryWithRetry(6 * time.Second); err == nil {
 				batteryPercent = b
+				log.Printf("PiSugar battery level: %.1f%%", batteryPercent)
 			} else {
 				log.Printf("PiSugar battery query failed: %v", err)
 			}
@@ -182,6 +177,19 @@ func main() {
 		log.Printf("Data fetch failed (%v). Skipping render to conserve battery.", networkErr)
 		handleShutdownEvaluation(*shutdown, isRTCWake)
 		return
+	}
+
+	// If battery level was not retrieved successfully during early boot (or read <= 0),
+	// retry now before rendering and publishing to Home Assistant since pisugar-server
+	// will be fully initialized by now.
+	if batteryPercent <= 0 && *battery == "" {
+		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 1500*time.Millisecond)
+		if b, err := sugarClient.GetBatteryWithRetry(3 * time.Second); err == nil && b > 0 {
+			batteryPercent = b
+			log.Printf("Refreshed PiSugar battery level: %.1f%%", batteryPercent)
+		} else {
+			log.Printf("Secondary PiSugar battery refresh failed: %v", err)
+		}
 	}
 
 	// Network succeeded: render calendar image

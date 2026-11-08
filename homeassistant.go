@@ -3,11 +3,23 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"net"
+	"strconv"
+	"strings"
 	"time"
 
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
+
+func parseBatteryOverride(raw string) (float64, error) {
+	parts := strings.Fields(strings.TrimSpace(raw))
+	if len(parts) == 0 {
+		return 0, fmt.Errorf("empty battery override")
+	}
+	rawVal := strings.TrimSuffix(parts[len(parts)-1], "%")
+	return strconv.ParseFloat(rawVal, 64)
+}
 
 type HAEntityConfig struct {
 	Name              string   `json:"name"`
@@ -33,7 +45,7 @@ func newBatterySensorConfig(device HADevice) HAEntityConfig {
 		Name:              "Wall Calendar Battery",
 		StateTopic:        "wall_calendar/state",
 		UnitOfMeasurement: "%",
-		ValueTemplate:     "{{ value_json.battery }}",
+		ValueTemplate:     "{{ value_json.battery if value_json.battery is defined else this.state }}",
 		UniqueID:          "wall_calendar_battery",
 		Device:            device,
 		DeviceClass:       "battery",
@@ -50,6 +62,16 @@ func newLastUpdateSensorConfig(device HADevice) HAEntityConfig {
 		Device:        device,
 		DeviceClass:   "timestamp",
 	}
+}
+
+func buildHAStatePayload(battery float64, now time.Time) map[string]interface{} {
+	state := map[string]interface{}{
+		"last_update": now.Format(time.RFC3339),
+	}
+	if battery > 0 {
+		state["battery"] = battery
+	}
+	return state
 }
 
 func getMACAddress() string {
@@ -110,9 +132,9 @@ func PublishToHomeAssistant(battery float64, cfg Config) error {
 
 	// Publish State
 	stateTopic := "wall_calendar/state"
-	state := map[string]interface{}{
-		"battery":     battery,
-		"last_update": time.Now().Format(time.RFC3339),
+	state := buildHAStatePayload(battery, time.Now())
+	if battery <= 0 {
+		log.Printf("Warning: battery value is non-positive (%.1f%%); omitting from Home Assistant state payload to preserve last known reading", battery)
 	}
 	publishJSON(client, stateTopic, state)
 
