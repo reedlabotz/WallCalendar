@@ -4,21 +4,34 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 )
 
-// PiSugarClient manages communication with the local PiSugar server over TCP.
+// DefaultPiSugarSocket is the default Unix domain socket path created by pisugar-server.
+const DefaultPiSugarSocket = "/tmp/pisugar-server.sock"
+
+// DefaultPiSugarTCP is the fallback local TCP address for pisugar-server.
+const DefaultPiSugarTCP = "127.0.0.1:8423"
+
+// PiSugarClient manages communication with the local PiSugar server over TCP or Unix domain socket.
 type PiSugarClient struct {
 	addr    string
 	timeout time.Duration
 }
 
 // NewPiSugarClient creates a new PiSugarClient for the given address and per-call timeout.
+// If addr is empty or DefaultPiSugarTCP, it checks for DefaultPiSugarSocket (/tmp/pisugar-server.sock)
+// and uses it if present, eliminating loopback TCP overhead.
 func NewPiSugarClient(addr string, timeout time.Duration) *PiSugarClient {
-	if addr == "" {
-		addr = "127.0.0.1:8423"
+	if addr == "" || addr == DefaultPiSugarTCP {
+		if _, err := os.Stat(DefaultPiSugarSocket); err == nil {
+			addr = DefaultPiSugarSocket
+		} else if addr == "" {
+			addr = DefaultPiSugarTCP
+		}
 	}
 	if timeout <= 0 {
 		timeout = 1500 * time.Millisecond

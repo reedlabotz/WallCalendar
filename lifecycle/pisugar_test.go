@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"net"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -380,3 +381,48 @@ func TestPiSugarClient_SyncRTCWeb(t *testing.T) {
 		t.Fatalf("expected rtc_web to be sent")
 	}
 }
+
+func TestPiSugarClient_UnixSocket(t *testing.T) {
+	tmpDir := t.TempDir()
+	sockPath := filepath.Join(tmpDir, "pisugar.sock")
+
+	listener, err := net.Listen("unix", sockPath)
+	if err != nil {
+		t.Fatalf("failed to listen on unix socket: %v", err)
+	}
+	defer listener.Close()
+
+	go func() {
+		conn, err := listener.Accept()
+		if err != nil {
+			return
+		}
+		defer conn.Close()
+		scanner := bufio.NewScanner(conn)
+		if scanner.Scan() {
+			if scanner.Text() == "get battery" {
+				fmt.Fprintln(conn, "battery: 88.5%")
+			}
+		}
+	}()
+
+	client := NewPiSugarClient(sockPath, 500*time.Millisecond)
+	batt, err := client.GetBattery()
+	if err != nil {
+		t.Fatalf("unexpected error reading via unix socket: %v", err)
+	}
+	if batt != 88.5 {
+		t.Fatalf("expected 88.5 from unix socket, got %.1f", batt)
+	}
+}
+
+func TestNewPiSugarClient_Defaults(t *testing.T) {
+	client := NewPiSugarClient("", 0)
+	if client.timeout <= 0 {
+		t.Errorf("expected positive default timeout, got %v", client.timeout)
+	}
+	if client.addr == "" {
+		t.Errorf("expected non-empty default address")
+	}
+}
+

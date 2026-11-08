@@ -92,29 +92,35 @@ func main() {
 	var weatherMap map[string]DailyWeather
 	var networkErr error
 
+	// Task 3: Background PiSugar battery query (runs concurrently so it never blocks network sync or font loading)
+	batteryChan := make(chan float64, 1)
+	if *battery != "" {
+		if b, err := parseBatteryOverride(*battery); err == nil {
+			batteryChan <- b
+			log.Printf("Using battery override: %.1f%%", b)
+		} else {
+			log.Printf("Failed to parse --battery override %q: %v", *battery, err)
+			batteryChan <- 0
+		}
+	} else {
+		go func() {
+			sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 1500*time.Millisecond)
+			if b, err := sugarClient.GetBatteryWithRetry(10 * time.Second); err == nil && b > 0 {
+				log.Printf("PiSugar battery level: %.1f%%", b)
+				batteryChan <- b
+			} else {
+				log.Printf("PiSugar battery query failed: %v", err)
+				batteryChan <- 0
+			}
+		}()
+	}
+
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
 
-		// Query PiSugar
+		// Query PiSugar for RTC wake and sync RTC to system clock
 		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 1500*time.Millisecond)
-		if *battery != "" {
-			if b, err := parseBatteryOverride(*battery); err == nil {
-				batteryPercent = b
-				log.Printf("Using battery override: %.1f%%", batteryPercent)
-			} else {
-				log.Printf("Failed to parse --battery override %q: %v", *battery, err)
-			}
-		} else {
-			// Allow up to 6 seconds for pisugar-server to initialize and provide a positive reading on boot
-			if b, err := sugarClient.GetBatteryWithRetry(6 * time.Second); err == nil {
-				batteryPercent = b
-				log.Printf("PiSugar battery level: %.1f%%", batteryPercent)
-			} else {
-				log.Printf("PiSugar battery query failed: %v", err)
-			}
-		}
-
 		if isWake, err := sugarClient.IsRTCWake(); err == nil {
 			isRTCWake = isWake
 		} else {
@@ -179,22 +185,36 @@ func main() {
 		return
 	}
 
-	// If battery level was not retrieved successfully during early boot (or read <= 0),
-	// retry now before rendering and publishing to Home Assistant since pisugar-server
-	// will be fully initialized by now.
-	if batteryPercent <= 0 && *battery == "" {
-		sugarClient := lifecycle.NewPiSugarClient(*piSugarAddr, 1500*time.Millisecond)
-		if b, err := sugarClient.GetBatteryWithRetry(3 * time.Second); err == nil && b > 0 {
-			batteryPercent = b
-			log.Printf("Refreshed PiSugar battery level: %.1f%%", batteryPercent)
+	// Collect battery reading from background query (allow up to 1s if network was exceptionally fast)
+	select {
+	case b := <-batteryChan:
+		batteryPercent = b
+	case <-time.After(1 * time.Second):
+		log.Printf("Timed out waiting for background battery query")
+	}
+
+	// Persist valid battery percentage to cache for display fallback
+	if batteryPercent > 0 {
+		if err := lifecycle.SaveCachedBattery("", batteryPercent); err != nil {
+			log.Printf("Warning: failed to cache battery percentage: %v", err)
+		}
+	}
+
+	// For display rendering: if current reading failed (<= 0), use the last known cached battery
+	// so the physical e-ink screen never displays an alarming '0%' in red.
+	displayBattery := batteryPercent
+	if displayBattery <= 0 {
+		if cached, err := lifecycle.LoadCachedBattery(""); err == nil {
+			log.Printf("Using cached battery level for e-ink display: %.1f%%", cached)
+			displayBattery = cached
 		} else {
-			log.Printf("Secondary PiSugar battery refresh failed: %v", err)
+			log.Printf("No cached battery available for display: %v", err)
 		}
 	}
 
 	// Network succeeded: render calendar image
 	img := waveshare.NewHorizontalLSB(image.Rect(0, 0, 1304, 984))
-	renderCalendar(img, cfg, today, start, lastday, dateMap, weatherMap, goMono, unifontMono, batteryPercent, newYork)
+	renderCalendar(img, cfg, today, start, lastday, dateMap, weatherMap, goMono, unifontMono, displayBattery, newYork)
 
 	if *onlyRenderImage {
 		f, err := os.Create("processed.png")
